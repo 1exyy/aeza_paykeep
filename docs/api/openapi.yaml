@@ -1265,7 +1265,7 @@ components:
         action:
           type: string
           examples: [auth.login, auth.login_failed, occurrence.mark_paid, recurring.stop, telegram.paid_button]
-        object_type: { type: [string, "null"], enum: [user, recurring_payment, payment_occurrence, attachment, notification, null] }
+        object_type: { type: [string, "null"], enum: [user, recurring_payment, payment_occurrence, attachment, notification, personal_reminder, team_application, null] }
         object_id: { type: [integer, "null"] }
         result: { type: string, enum: [success, failure] }
         details: { type: object, additionalProperties: true, description: "Без паролей, токенов и initData" }

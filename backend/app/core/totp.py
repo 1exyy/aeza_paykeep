@@ -47,8 +47,13 @@ def decrypt(value: str) -> str:
 def provisioning_uri(secret: str, team: str, login: str) -> str:
     issuer = "Aeza PayKeep"
     label = f"{team}:{login}"
-    return "otpauth://totp/" + quote(f"{issuer}:{label}", safe="") + "?" + urlencode(
-        {"secret": secret, "issuer": issuer, "algorithm": "SHA1", "digits": 6, "period": STEP}
+    return (
+        "otpauth://totp/"
+        + quote(f"{issuer}:{label}", safe="")
+        + "?"
+        + urlencode(
+            {"secret": secret, "issuer": issuer, "algorithm": "SHA1", "digits": 6, "period": STEP}
+        )
     )
 
 

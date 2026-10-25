@@ -103,7 +103,7 @@ async def test_admin_totp_is_required_single_use_and_limited(client: AsyncClient
     assert (await client.post(P, json=body, headers=admin)).status_code == 422
     freeze("2026-11-10T12:00:31+03:00")
     body["totp_code"] = "000000" if otp(secret) != "000000" else "999999"
-    for _ in range(5):
+    for _ in range(4):  # the reused code above was the first of five failures
         assert (await client.post(P, json=body, headers=admin)).status_code == 422
     body["totp_code"] = otp(secret)
     assert (await client.post(P, json=body, headers=admin)).status_code == 429

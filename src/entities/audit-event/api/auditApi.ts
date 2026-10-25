@@ -6,7 +6,7 @@ export type AuditEvent = {
   actor: { id: number; login: string } | null
   source: 'web' | 'telegram' | 'system'
   action: string
-  object_type: 'user' | 'recurring_payment' | 'payment_occurrence' | 'attachment' | 'notification' | null
+  object_type: 'user' | 'recurring_payment' | 'payment_occurrence' | 'attachment' | 'notification' | 'personal_reminder' | 'team_application' | null
   object_id: number | null
   result: 'success' | 'failure'
   details: Record<string, unknown>

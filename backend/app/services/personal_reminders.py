@@ -161,10 +161,7 @@ async def _deliver(db: AsyncSession, reminder_id: int) -> None:
     settings, _row = await team_settings(db, user.team_id)
     with use_settings(settings):
         active = get_settings()
-        if (
-            not active.telegram_dm_reminders
-            or not active.telegram_bot_token.get_secret_value()
-        ):
+        if not active.telegram_dm_reminders or not active.telegram_bot_token.get_secret_value():
             _hold(reminder, clock, until=real_now() + timedelta(hours=1))
             await db.commit()
             return
@@ -185,8 +182,7 @@ async def _deliver(db: AsyncSession, reminder_id: int) -> None:
             return
         assignment = await assignees.assignment(db, recurring.id)
         line = (
-            "Ответственные: "
-            + (", ".join(mention(person) for person in responsible) or "—")
+            "Ответственные: " + (", ".join(mention(person) for person in responsible) or "—")
             if has_assignees
             else None
         )

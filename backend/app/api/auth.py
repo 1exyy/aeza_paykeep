@@ -63,9 +63,7 @@ async def _verify_totp(db: AsyncSession, user: User, code: str, secret: str) -> 
         and now - user.totp_failed_at < TOTP_RATE_WINDOW
     ):
         raise AppError(429, "too_many_attempts", "Слишком много попыток. Повторите через 5 минут")
-    counter = totp.matching_counter(
-        totp.decrypt(secret), code, now, after=user.totp_last_counter
-    )
+    counter = totp.matching_counter(totp.decrypt(secret), code, now, after=user.totp_last_counter)
     if counter is None:
         if user.totp_failed_at is None or now - user.totp_failed_at >= TOTP_RATE_WINDOW:
             user.totp_failures = 0
@@ -220,8 +218,13 @@ async def begin_totp(
     user.updated_at = clock.now()
     team = await db.get(Team, user.team_id)
     audit.record(
-        db, clock, "auth.totp_setup_started", actor=user, object_type="user",
-        object_id=user.id, ip=client_ip(request),
+        db,
+        clock,
+        "auth.totp_setup_started",
+        actor=user,
+        object_type="user",
+        object_id=user.id,
+        ip=client_ip(request),
     )
     await db.commit()
     response.headers["Cache-Control"] = "no-store"
@@ -259,8 +262,13 @@ async def confirm_totp(
     user.version += 1
     user.updated_at = clock.now()
     audit.record(
-        db, clock, "auth.totp_enabled", actor=user, object_type="user",
-        object_id=user.id, ip=client_ip(request),
+        db,
+        clock,
+        "auth.totp_enabled",
+        actor=user,
+        object_type="user",
+        object_id=user.id,
+        ip=client_ip(request),
     )
     await db.commit()
     return UserOut.of(user)
