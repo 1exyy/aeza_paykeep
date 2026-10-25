@@ -163,6 +163,7 @@ async def test_switch_off_private_messages(
 async def test_user_can_opt_out_and_back_in_without_changing_other_recipients(
     client: AsyncClient, db: AsyncSession, bot: FakeBot, people: None
 ) -> None:
+    freeze("2026-11-08T10:00:00+03:00")  # the moment _remind uses: the sessions stay valid
     anna = bearer(await login(client, "anna", "anna-password"))
     boris = bearer(await login(client, "boris", "boris-password"))
     off = await client.patch(
@@ -171,8 +172,12 @@ async def test_user_can_opt_out_and_back_in_without_changing_other_recipients(
         headers=anna,
     )
     assert off.status_code == 200 and off.json()["telegram_dm_enabled"] is False
-    assert (await client.get("/api/v1/auth/me", headers=anna)).json()["telegram_dm_enabled"] is False
-    assert (await client.get("/api/v1/auth/me", headers=boris)).json()["telegram_dm_enabled"] is True
+    assert (await client.get("/api/v1/auth/me", headers=anna)).json()[
+        "telegram_dm_enabled"
+    ] is False
+    assert (await client.get("/api/v1/auth/me", headers=boris)).json()[
+        "telegram_dm_enabled"
+    ] is True
 
     await _remind(client)
     assert bot.chats() == [GROUP, "222"]

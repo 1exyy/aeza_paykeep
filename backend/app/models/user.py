@@ -70,7 +70,9 @@ class User(Base):
     )
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     telegram_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    telegram_dm_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    telegram_dm_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true"
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
