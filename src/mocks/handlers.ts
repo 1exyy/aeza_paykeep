@@ -54,6 +54,16 @@ export const handlers = [
     demoState.activeUser!.telegram_dm_enabled = body.telegram_dm_enabled
     return HttpResponse.json(demoState.activeUser)
   }),
+  http.patch(`${api}/auth/me/reminder-days`, async ({ request }) => {
+    const denied = requireUser()
+    if (denied) return denied
+    const body = await request.json() as { telegram_dm_days_before: number }
+    if (!Number.isInteger(body.telegram_dm_days_before) || body.telegram_dm_days_before < 0 || body.telegram_dm_days_before > 30) {
+      return jsonError(422, 'validation_error', 'Укажите от 0 до 30 дней')
+    }
+    demoState.activeUser!.telegram_dm_days_before = body.telegram_dm_days_before
+    return HttpResponse.json(demoState.activeUser)
+  }),
   http.post(`${api}/auth/login`, async ({ request }) => {
     const body = await request.json() as { team?: string; login?: string; password?: string }
     const user = demoState.users.find(({ login }) => login === body.login)
@@ -170,7 +180,7 @@ export const handlers = [
     if (denied) return denied
     const body = await request.json() as { login: string; password: string; telegram?: string }
     if (demoState.users.some(({ login }) => login === body.login)) return jsonError(409, 'login_taken', 'Логин занят')
-    const user = { id: nextId(demoState.users), login: body.login, role: 'user' as const, is_protected: false, telegram_dm_enabled: true, ...telegramOf(body.telegram), created_at: demoTimestamp, updated_at: demoTimestamp }
+    const user = { id: nextId(demoState.users), login: body.login, role: 'user' as const, is_protected: false, telegram_dm_enabled: true, telegram_dm_days_before: 3, ...telegramOf(body.telegram), created_at: demoTimestamp, updated_at: demoTimestamp }
     demoState.users.push(user)
     audit('user.created', 'user', user.id)
     return HttpResponse.json(user, { status: 201 })

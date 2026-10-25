@@ -20,6 +20,7 @@ class UserOut(BaseModel):
     must_change_password: bool
     telegram_linked: bool
     telegram_dm_enabled: bool
+    telegram_dm_days_before: int
     telegram_username: str | None
     telegram_user_id: int | None
     created_at: datetime
@@ -35,6 +36,7 @@ class UserOut(BaseModel):
             must_change_password=user.must_change_password,
             telegram_linked=user.telegram_linked,
             telegram_dm_enabled=user.telegram_dm_enabled,
+            telegram_dm_days_before=user.telegram_dm_days_before,
             telegram_username=user.telegram_username,
             telegram_user_id=user.telegram_user_id,
             created_at=to_local(user.created_at),
@@ -73,6 +75,12 @@ class DmNotificationPreference(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     telegram_dm_enabled: bool
+
+
+class DmReminderDays(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    telegram_dm_days_before: int = Field(strict=True, ge=0, le=30)
 
 
 class SessionOut(BaseModel):

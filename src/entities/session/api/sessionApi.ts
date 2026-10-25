@@ -10,6 +10,7 @@ export type User = {
   must_change_password?: boolean
   telegram_linked: boolean
   telegram_dm_enabled: boolean
+  telegram_dm_days_before: number
   /** Without @; set by the admin or learned from Telegram. */
   telegram_username?: string | null
   telegram_user_id?: number | null
@@ -44,7 +45,11 @@ const sessionApi = baseApi.injectEndpoints({
       query: (telegram_dm_enabled) => ({ url: 'auth/me/notifications', method: 'PATCH', body: { telegram_dm_enabled } }),
       invalidatesTags: (_result, error) => error ? [] : ['Session'],
     }),
+    updateDmReminderDays: builder.mutation<User, number>({
+      query: (telegram_dm_days_before) => ({ url: 'auth/me/reminder-days', method: 'PATCH', body: { telegram_dm_days_before } }),
+      invalidatesTags: (_result, error) => error ? [] : ['Session'],
+    }),
   }),
 })
 
-export const { useGetMeQuery, useLoginMutation, useLogoutMutation, useChangePasswordMutation, useUpdateDmNotificationsMutation } = sessionApi
+export const { useGetMeQuery, useLoginMutation, useLogoutMutation, useChangePasswordMutation, useUpdateDmNotificationsMutation, useUpdateDmReminderDaysMutation } = sessionApi

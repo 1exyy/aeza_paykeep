@@ -56,7 +56,7 @@ def _default_registry() -> ChannelRegistry:
 
     settings = get_settings()
     registry: ChannelRegistry = {}
-    if settings.telegram_enabled:
+    if settings.telegram_bot_token.get_secret_value() and settings.telegram_chat_id:
         registry["telegram"] = TelegramChannel()
     if settings.email_enabled:
         registry["email"] = EmailChannel()

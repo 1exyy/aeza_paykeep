@@ -23,6 +23,7 @@ class User(Base):
         CheckConstraint("role IN ('admin', 'user', 'supervisor')", name="role"),
         # The supervisor is the only account outside the teams, one per service
         CheckConstraint("(role = 'supervisor') = (team_id IS NULL)", name="supervisor_no_team"),
+        CheckConstraint("telegram_dm_days_before BETWEEN 0 AND 30", name="telegram_dm_days_before"),
         Index(
             "uq_users_single_supervisor",
             "role",
@@ -73,6 +74,7 @@ class User(Base):
     telegram_dm_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="true"
     )
+    telegram_dm_days_before: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

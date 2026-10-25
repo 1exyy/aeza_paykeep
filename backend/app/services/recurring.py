@@ -17,7 +17,7 @@ from app.models.attachment import Attachment
 from app.models.payment import PaymentOccurrence, RecurringPayment
 from app.models.user import User
 from app.schemas.recurring import RecurringPaymentCreate, RecurringPaymentPatch, check_interval
-from app.services import assignees, audit, events, outbox
+from app.services import assignees, audit, events, outbox, personal_reminders
 from app.services.generator import ensure_occurrences
 from app.services.reminders import plan_reminders
 
@@ -63,9 +63,9 @@ async def create_recurring(
     await db.flush()
     await assignees.replace(db, recurring, chosen, data.assign_all)
     await ensure_occurrences(db, recurring, today, now)
-    # Late creation (due ≤ today + 3): the reminder is queued in this same transaction and the
-    # dispatcher sends it within seconds.
+    # Late creation queues team and eligible personal reminders in this transaction.
     await plan_reminders(db, clock, get_channels(), recurring_payment_id=recurring.id)
+    await personal_reminders.plan(db, clock, actor.team_id)
     audit.record(
         db,
         clock,
@@ -287,6 +287,7 @@ async def update_recurring(
     if "schedule" in changes:
         await ensure_occurrences(db, recurring, today, now)
         await plan_reminders(db, clock, get_channels(), recurring_payment_id=recurring.id)
+        await personal_reminders.plan(db, clock, actor.team_id)
     only_assignees = set(changes) == {"assignees"}
     details: dict[str, object] = {"title": recurring.title}
     if only_assignees:

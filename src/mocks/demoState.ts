@@ -7,6 +7,7 @@ export type DemoUser = {
   must_change_password?: boolean
   telegram_linked: boolean
   telegram_dm_enabled: boolean
+  telegram_dm_days_before: number
   telegram_username?: string | null
   telegram_user_id?: number | null
   created_at: string
@@ -69,9 +70,9 @@ export type DemoAttachment = {
 
 export const demoToday = '2026-10-24'
 export const demoTimestamp = '2026-10-24T12:00:00+03:00'
-const admin: DemoUser = { id: 1, login: 'admin', role: 'admin', is_protected: true, telegram_linked: false, telegram_dm_enabled: true, created_at: demoTimestamp, updated_at: demoTimestamp }
-const anna: DemoUser = { id: 2, login: 'anna', role: 'user', is_protected: false, telegram_linked: false, telegram_dm_enabled: true, created_at: demoTimestamp, updated_at: demoTimestamp }
-const boss: DemoUser = { id: 3, login: 'boss', role: 'supervisor', is_protected: true, telegram_linked: false, telegram_dm_enabled: true, created_at: demoTimestamp, updated_at: demoTimestamp }
+const admin: DemoUser = { id: 1, login: 'admin', role: 'admin', is_protected: true, telegram_linked: false, telegram_dm_enabled: true, telegram_dm_days_before: 3, created_at: demoTimestamp, updated_at: demoTimestamp }
+const anna: DemoUser = { id: 2, login: 'anna', role: 'user', is_protected: false, telegram_linked: false, telegram_dm_enabled: true, telegram_dm_days_before: 3, created_at: demoTimestamp, updated_at: demoTimestamp }
+const boss: DemoUser = { id: 3, login: 'boss', role: 'supervisor', is_protected: true, telegram_linked: false, telegram_dm_enabled: true, telegram_dm_days_before: 3, created_at: demoTimestamp, updated_at: demoTimestamp }
 
 export const demoState = {
   activeUser: null as DemoUser | null,

@@ -103,3 +103,34 @@ class Delivery(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PersonalReminder(Base):
+    """One private Telegram reminder for a user and a payment period."""
+
+    __tablename__ = "personal_reminders"
+    __table_args__ = (
+        UniqueConstraint("user_id", "occurrence_id", name="uq_personal_reminders_user_occurrence"),
+        CheckConstraint(
+            "status IN ('pending', 'sending', 'sent', 'failed', 'unknown')", name="status"
+        ),
+        Index(
+            "ix_personal_reminders_pending",
+            "next_attempt_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    occurrence_id: Mapped[int] = mapped_column(
+        ForeignKey("payment_occurrences.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sending_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

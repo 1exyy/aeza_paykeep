@@ -23,9 +23,11 @@ from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.errors import AppError
 from app.core.security import hash_password, hash_token, new_session_token, verify_password
+from app.models.notification import PersonalReminder
 from app.models.user import LoginAttempt, User, UserSession
 from app.schemas.user import (
     DmNotificationPreference,
+    DmReminderDays,
     LoginRequest,
     LoginResponse,
     PasswordChange,
@@ -181,6 +183,49 @@ async def update_my_notifications(
             object_type="user",
             object_id=user.id,
             details={"telegram_dm_enabled": body.telegram_dm_enabled},
+            ip=client_ip(request),
+        )
+        if body.telegram_dm_enabled:
+            await db.execute(
+                update(PersonalReminder)
+                .where(
+                    PersonalReminder.user_id == user.id,
+                    PersonalReminder.status == "pending",
+                )
+                .values(next_attempt_at=real_now())
+            )
+        await db.commit()
+    return UserOut.of(user)
+
+
+@router.patch("/me/reminder-days", response_model=UserOut)
+async def update_my_reminder_days(
+    body: DmReminderDays,
+    request: Request,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_session),
+    clock: Clock = Depends(clock_dep),
+) -> UserOut:
+    if user.telegram_dm_days_before != body.telegram_dm_days_before:
+        user.telegram_dm_days_before = body.telegram_dm_days_before
+        user.version += 1
+        user.updated_at = clock.now()
+        await db.execute(
+            update(PersonalReminder)
+            .where(
+                PersonalReminder.user_id == user.id,
+                PersonalReminder.status == "pending",
+            )
+            .values(next_attempt_at=real_now())
+        )
+        audit.record(
+            db,
+            clock,
+            "user.telegram_dm_days_changed",
+            actor=user,
+            object_type="user",
+            object_id=user.id,
+            details={"telegram_dm_days_before": body.telegram_dm_days_before},
             ip=client_ip(request),
         )
         await db.commit()

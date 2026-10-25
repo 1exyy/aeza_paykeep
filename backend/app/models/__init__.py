@@ -6,7 +6,7 @@ from app.models.application_draft import ApplicationDraft
 from app.models.attachment import Attachment
 from app.models.audit_event import AuditEvent
 from app.models.base import Base
-from app.models.notification import Delivery, Notification
+from app.models.notification import Delivery, Notification, PersonalReminder
 from app.models.payment import PaymentOccurrence, RecurringPayment, RecurringPaymentAssignee
 from app.models.system_state import SystemState
 from app.models.team import Team
@@ -22,6 +22,7 @@ __all__ = [
     "LoginAttempt",
     "Notification",
     "PaymentOccurrence",
+    "PersonalReminder",
     "RecurringPayment",
     "RecurringPaymentAssignee",
     "SystemState",

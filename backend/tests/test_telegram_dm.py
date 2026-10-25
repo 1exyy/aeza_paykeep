@@ -1,4 +1,4 @@
-"""Private Telegram reminders inside the `telegram` channel. Fake bot."""
+"""Private Telegram reminders on each user's schedule. Fake bot."""
 
 from datetime import timedelta
 
@@ -18,9 +18,9 @@ from app.channels import telegram as telegram_channel
 from app.core import clock
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
-from app.models.notification import Delivery
+from app.models.notification import Delivery, PersonalReminder
 from app.models.user import User
-from app.worker.jobs import dispatch_deliveries
+from app.worker.jobs import dispatch_deliveries, run_cycle
 from tests.helpers import ADMIN, bearer, create_recurring, create_user, freeze, login
 
 GROUP = "-1001234567890"
@@ -106,7 +106,7 @@ async def test_group_then_linked_users(
     assert d.status == "sent" and d.last_error is None and d.external_id == "1"
 
 
-async def test_failed_private_message_does_not_fail_or_repeat(
+async def test_failed_private_message_retries_independently_of_group(
     client: AsyncClient, db: AsyncSession, bot: FakeBot, people: None
 ) -> None:
     bot.errors["111"] = [
@@ -116,35 +116,38 @@ async def test_failed_private_message_does_not_fail_or_repeat(
     await _remind(client)
     d = await _delivery(db)
     assert d.status == "sent"
-    assert d.last_error is not None and d.last_error.startswith("private messages 0/2")
-    assert "anna: Telegram 403" in d.last_error and "boris: network" in d.last_error
+    assert d.last_error is None
+    db.expire_all()
+    rows = (await db.scalars(select(PersonalReminder).order_by(PersonalReminder.user_id))).all()
+    assert [r.status for r in rows] == ["pending", "unknown"]
+    assert "Telegram 403" in (rows[0].last_error or "")
     moment = clock.real_now() + timedelta(hours=1)
     clock.set_real_now(lambda: moment)
     await _dispatch()
-    assert bot.chats() == [GROUP, "111", "222"]  # nothing is sent again
+    assert bot.chats() == [GROUP, "111", "222", "111"]  # no duplicate group or unknown DM
 
 
-async def test_group_error_sends_no_private_messages_until_retry(
+async def test_group_error_does_not_delay_private_messages(
     client: AsyncClient, db: AsyncSession, bot: FakeBot, people: None
 ) -> None:
     bot.errors[GROUP] = [TelegramBadRequest(method=_M, message="chat not found")]
     await _remind(client)
-    assert bot.chats() == [GROUP]
+    assert bot.chats() == [GROUP, "111", "222"]
     d = await _delivery(db)
     assert d.status == "pending"
     moment = d.next_attempt_at + timedelta(seconds=1)
     clock.set_real_now(lambda: moment)
     await _dispatch()
-    assert bot.chats() == [GROUP, GROUP, "111", "222"]  # each private message exactly once
+    assert bot.chats() == [GROUP, "111", "222", GROUP]  # each private message exactly once
     assert (await _delivery(db)).status == "sent"
 
 
-async def test_group_no_answer_is_unknown_without_private_messages(
+async def test_group_no_answer_does_not_block_private_messages(
     client: AsyncClient, db: AsyncSession, bot: FakeBot, people: None
 ) -> None:
     bot.errors[GROUP] = [TelegramNetworkError(method=_M, message="timeout")]
     await _remind(client)
-    assert bot.chats() == [GROUP]
+    assert bot.chats() == [GROUP, "111", "222"]
     assert (await _delivery(db)).status == "unknown"
 
 
@@ -215,6 +218,82 @@ async def test_opt_out_applies_to_assigned_reminders(
     assert "Ответственные:" in bot.calls[0]["text"]
 
 
+async def test_each_user_receives_one_reminder_on_their_chosen_day(
+    client: AsyncClient, db: AsyncSession, bot: FakeBot, people: None
+) -> None:
+    freeze("2026-11-05T10:00:00+03:00")
+    anna = bearer(await login(client, "anna", "anna-password"))
+    boris = bearer(await login(client, "boris", "boris-password"))
+    assert (await client.get("/api/v1/auth/me", headers=anna)).json()[
+        "telegram_dm_days_before"
+    ] == 3
+    changed = await client.patch(
+        "/api/v1/auth/me/reminder-days",
+        json={"telegram_dm_days_before": 5},
+        headers=anna,
+    )
+    assert changed.status_code == 200 and changed.json()["telegram_dm_days_before"] == 5
+    await client.patch(
+        "/api/v1/auth/me/reminder-days",
+        json={"telegram_dm_days_before": 1},
+        headers=boris,
+    )
+    assert (await client.get("/api/v1/auth/me", headers=anna)).json()[
+        "telegram_dm_days_before"
+    ] == 5
+
+    await create_recurring(client, bearer(await login(client, *ADMIN)), "2026-11-10")
+    await _dispatch()
+    assert bot.chats() == ["111"]
+
+    freeze("2026-11-07T10:00:00+03:00")
+    async with get_sessionmaker()() as session:
+        await run_cycle(session)
+    await _dispatch()
+    assert bot.chats() == ["111", GROUP]
+
+    freeze("2026-11-09T10:00:00+03:00")
+    async with get_sessionmaker()() as session:
+        await run_cycle(session)
+    await _dispatch()
+    assert bot.chats() == ["111", GROUP, "222"]
+    await _dispatch()
+    assert bot.chats() == ["111", GROUP, "222"]
+    db.expire_all()
+    assert [r.status for r in (await db.scalars(select(PersonalReminder))).all()] == [
+        "sent",
+        "sent",
+    ]
+
+
+async def test_reminder_days_validation_and_same_day(
+    client: AsyncClient, db: AsyncSession, bot: FakeBot, people: None
+) -> None:
+    freeze("2026-11-08T10:00:00+03:00")
+    anna = bearer(await login(client, "anna", "anna-password"))
+    for value in (-1, 31, 1.5):
+        response = await client.patch(
+            "/api/v1/auth/me/reminder-days",
+            json={"telegram_dm_days_before": value},
+            headers=anna,
+        )
+        assert response.status_code == 422
+    response = await client.patch(
+        "/api/v1/auth/me/reminder-days",
+        json={"telegram_dm_days_before": 0},
+        headers=anna,
+    )
+    assert response.status_code == 200
+    await create_recurring(client, bearer(await login(client, *ADMIN)), "2026-11-10")
+    await _dispatch()
+    assert bot.chats() == [GROUP, "222"]
+    freeze("2026-11-10T10:00:00+03:00")
+    async with get_sessionmaker()() as session:
+        await run_cycle(session)
+    await _dispatch()
+    assert bot.chats() == [GROUP, "222", "111"]
+
+
 async def test_private_only_without_group_chat(
     client: AsyncClient,
     db: AsyncSession,
@@ -226,17 +305,20 @@ async def test_private_only_without_group_chat(
     bot.errors["111"] = [TelegramForbiddenError(method=_M, message="Forbidden")]
     await _remind(client)
     assert bot.chats() == ["111", "222"]
-    d = await _delivery(db)
-    assert d.status == "sent" and "anna: Telegram 403" in (d.last_error or "")
+    assert (await db.scalars(select(Delivery).where(Delivery.channel == "telegram"))).all() == []
+    db.expire_all()
+    rows = (await db.scalars(select(PersonalReminder).order_by(PersonalReminder.user_id))).all()
+    assert [r.status for r in rows] == ["pending", "sent"]
+    assert "Telegram 403" in (rows[0].last_error or "")
 
 
-async def test_private_only_and_nobody_received_is_retried(
+async def test_private_only_without_linked_users_queues_nothing(
     client: AsyncClient, db: AsyncSession, bot: FakeBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(get_settings(), "telegram_chat_id", "")
     await _remind(client)  # no linked users at all
-    d = await _delivery(db)
-    assert d.status == "pending" and d.last_error == "no TELEGRAM_CHAT_ID and no linked users"
+    assert (await db.scalars(select(Delivery))).all() == []
+    assert (await db.scalars(select(PersonalReminder))).all() == []
 
 
 def test_channel_enabled_rules(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -245,7 +327,7 @@ def test_channel_enabled_rules(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "telegram" not in get_channels()
     monkeypatch.setattr(settings, "telegram_bot_token", type(settings.telegram_bot_token)("1:T"))
     monkeypatch.setattr(settings, "telegram_chat_id", "")
-    assert "telegram" in get_channels()  # private messages only
+    assert "telegram" not in get_channels()  # private messages use their own queue
     monkeypatch.setattr(settings, "telegram_dm_reminders", False)
     assert "telegram" not in get_channels()
     monkeypatch.setattr(settings, "telegram_chat_id", GROUP)

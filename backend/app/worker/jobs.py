@@ -10,7 +10,7 @@ from app.channels import ChannelRegistry, get_channels
 from app.core.clock import get_clock
 from app.core.config import use_settings
 from app.models.team import Team
-from app.services import outbox
+from app.services import outbox, personal_reminders
 from app.services.generator import ensure_all
 from app.services.notification_settings import team_settings
 from app.services.reminders import plan_reminders
@@ -37,6 +37,7 @@ async def run_cycle(db: AsyncSession, channels: ChannelRegistry | None = None) -
         with use_settings(settings):
             team_channels = get_channels() if channels is None else channels
             reminders += await plan_reminders(db, clock, team_channels, team_id=team_id)
+            await personal_reminders.plan(db, clock, team_id)
     await db.commit()
     if periods or reminders:
         logger.info("cycle: %d new periods, %d new reminders", periods, len(reminders))
@@ -45,4 +46,6 @@ async def run_cycle(db: AsyncSession, channels: ChannelRegistry | None = None) -
 
 async def dispatch_deliveries(db: AsyncSession, channels: ChannelRegistry | None = None) -> int:
     """Send due deliveries; each one goes out with its team's settings."""
-    return await outbox.dispatch(db, channels)
+    group_count = await outbox.dispatch(db, channels)
+    personal_count = await personal_reminders.dispatch(db)
+    return group_count + personal_count

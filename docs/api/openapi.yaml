@@ -91,6 +91,25 @@ paths:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "422": { $ref: "#/components/responses/ValidationError" }
+  /auth/me/reminder-days:
+    patch:
+      tags: [auth]
+      summary: Задать срок личного напоминания до оплаты
+      description: Влияет только на ещё не отправленные сообщения в Telegram ЛС.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [telegram_dm_days_before]
+              additionalProperties: false
+              properties:
+                telegram_dm_days_before: { type: integer, minimum: 0, maximum: 30 }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
   /auth/password:
     post:
       tags: [auth]
@@ -798,7 +817,7 @@ components:
 
     User:
       type: object
-      required: [id, login, role, is_protected, must_change_password, telegram_linked, telegram_dm_enabled, telegram_username, telegram_user_id, created_at, updated_at]
+      required: [id, login, role, is_protected, must_change_password, telegram_linked, telegram_dm_enabled, telegram_dm_days_before, telegram_username, telegram_user_id, created_at, updated_at]
       properties:
         id: { type: integer }
         login: { type: string }
@@ -807,6 +826,7 @@ components:
         must_change_password: { type: boolean, description: "Временный пароль: до смены доступны только /auth/me, /auth/password и /auth/logout (403 password_change_required)" }
         telegram_linked: { type: boolean, description: "Известен числовой Telegram ID: работают кнопка «Оплачено» и личные напоминания" }
         telegram_dm_enabled: { type: boolean, description: "Получать личные напоминания в Telegram; общие уведомления команды не затрагивает" }
+        telegram_dm_days_before: { type: integer, minimum: 0, maximum: 30, description: "За сколько дней до оплаты отправлять личное напоминание; 0 — в день оплаты" }
         telegram_username: { type: [string, "null"], description: "Без @. Задан админом или пришёл из Telegram" }
         telegram_user_id: { type: [integer, "null"], description: "Числовой Telegram ID; null, пока человек не написал боту (если задан только username)" }
         created_at: { type: string, format: date-time }
