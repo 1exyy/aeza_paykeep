@@ -1,0 +1,9 @@
+.primary, .secondary, .danger { min-height: var(--control-min-height); padding: 10px 18px; border-radius: var(--radius-control); font-weight: 600; font-size: 16px; line-height: 22px; border: 2px solid transparent; }
+.primary { background: var(--color-primary); color: var(--color-on-primary); }
+.primary:hover:not(:disabled) { background: var(--color-primary-hover); }
+.primary:active:not(:disabled) { background: var(--color-primary-pressed); }
+.secondary { background: var(--color-surface-muted); color: var(--color-text); border-color: var(--color-control-border); }
+.secondary:hover:not(:disabled) { background: var(--color-surface-accent); }
+.danger { background: var(--color-danger); color: #fff; }
+.danger:hover:not(:disabled) { background: #991b1b; }
+.primary:disabled, .secondary:disabled, .danger:disabled { opacity: .55; cursor: not-allowed; }

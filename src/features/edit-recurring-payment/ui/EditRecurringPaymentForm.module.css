@@ -1,0 +1,4 @@
+.form { display: grid; gap: var(--space-4); max-width: var(--form-max-width); }
+.error { color: var(--color-danger); margin: 0; font-size: 14px; }
+.note { margin: 0; color: var(--color-text-muted); font-size: 14px; }
+.actions { display: flex; gap: var(--space-3); flex-wrap: wrap; }

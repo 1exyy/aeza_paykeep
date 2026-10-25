@@ -1,0 +1,11 @@
+# HTTPS for the whole app (frontend + /api) with an automatic certificate.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:80
+}
+
+# Old addresses and www (REDIRECT_DOMAINS, comma-separated) move to DOMAIN for good.
+# Unset: compose passes a placeholder site that never matches a real request.
+{$REDIRECT_DOMAINS} {
+	redir https://{$DOMAIN}{uri} permanent
+}

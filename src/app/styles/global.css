@@ -1,0 +1,8 @@
+*, *::before, *::after { box-sizing: border-box; }
+html { font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--color-bg); color: var(--color-text); }
+body { margin: 0; min-width: 320px; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+:is(h1, h2, h3) { font-family: "Exo 2", "Inter", system-ui, sans-serif; letter-spacing: -.025em; }
+:focus-visible { outline: 3px solid var(--color-brand-navy); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }

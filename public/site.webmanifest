@@ -1,0 +1,13 @@
+{
+  "name": "Aéza PayKeep",
+  "short_name": "PayKeep",
+  "lang": "ru",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4F4F4",
+  "theme_color": "#4CC6F1",
+  "icons": [
+    { "src": "/brand/paykeep-wallet-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/brand/paykeep-wallet-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

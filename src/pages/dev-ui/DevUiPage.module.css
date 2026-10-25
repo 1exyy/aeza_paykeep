@@ -1,0 +1,9 @@
+.page { max-width: var(--content-max-width); padding: max(var(--space-6), var(--app-safe-top, 0px), env(safe-area-inset-top)) max(var(--space-4), var(--app-safe-right, 0px), env(safe-area-inset-right)) max(var(--space-6), var(--app-safe-bottom, 0px), env(safe-area-inset-bottom)) max(var(--space-4), var(--app-safe-left, 0px), env(safe-area-inset-left)); margin: auto; }
+.page h1 { font-size: 24px; line-height: 30px; margin: 0 0 var(--space-3); }
+.page h2 { font-size: 18px; line-height: 24px; margin: var(--space-6) 0 var(--space-3); }
+.page p { color: var(--color-text-muted); line-height: 24px; }
+.label { color: var(--color-primary) !important; font-size: 14px; font-weight: 700; }
+.row { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+.grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.fields { display: grid; gap: var(--space-4); max-width: var(--form-max-width); }
+.cards { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }

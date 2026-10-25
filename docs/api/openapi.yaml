@@ -1,0 +1,1217 @@
+openapi: 3.1.0
+info:
+  title: Invoice Keeper API
+  version: 1.2.0
+  description: |
+    Контракт API Invoice Keeper. Бизнес-правила: docs/DOMAIN.md.
+
+    Соглашения:
+    - единый часовой пояс системы задаётся в `.env` (`APP_TZ_OFFSET`, по умолчанию `+03:00` = GMT+3);
+    - даты `YYYY-MM-DD` (date-only, в часовом поясе системы), моменты времени ISO 8601 со смещением (`+03:00`);
+    - деньги — строка с двумя знаками (`"1500.00"`), валюты RUB/USD/EUR без конвертации;
+    - авторизация: cookie `ik_session` (HttpOnly) или `Authorization: Bearer <token>`;
+    - ошибки: `{"error": {"code", "message", "details"}}`.
+
+    Пути, помеченные `x-required: true`, — обязательный список из PDF кейса.
+servers:
+  - url: /api/v1
+security:
+  - cookieAuth: []
+  - bearerAuth: []
+tags:
+  - name: auth
+  - name: recurring-payments
+  - name: payment-occurrences
+  - name: payments
+  - name: users
+  - name: config
+  - name: calendar-budget
+  - name: attachments
+  - name: telegram
+  - name: audit
+  - name: notifications
+  - name: settings
+  - name: supervisor
+  - name: dev
+
+paths:
+  # ===================== AUTH =====================
+  /auth/login:
+    post:
+      tags: [auth]
+      x-required: true
+      security: []
+      summary: Вход в команду по логину и паролю (пустая команда — супервайзер)
+      description: |
+        Создаёт серверную сессию, ставит cookie `ik_session` и возвращает тот же токен в теле (для Swagger/curl).
+        Логин ищется внутри команды `team` (без учёта регистра и лишних пробелов).
+        На любую ошибку — один ответ «Неверная команда, логин или пароль».
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+            example: { team: "aeza", login: "anna", password: "anna-demo-123" }
+      responses:
+        "200":
+          description: Успешный вход
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: "ik_session=<token>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401": { $ref: "#/components/responses/InvalidCredentials" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "429": { $ref: "#/components/responses/TooManyAttempts" }
+  /auth/me:
+    get:
+      tags: [auth]
+      x-required: true
+      summary: Текущий пользователь
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /auth/password:
+    post:
+      tags: [auth]
+      summary: Сменить свой пароль
+      description: |
+        Нужен текущий пароль. Снимает признак временного пароля `must_change_password`;
+        остальные сессии пользователя завершаются. Доступно и с временным паролем.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              additionalProperties: false
+              properties:
+                current_password: { type: string, minLength: 1, maxLength: 128 }
+                new_password: { type: string, minLength: 8, maxLength: 128, description: "Не совпадает с текущим" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /auth/logout:
+    post:
+      tags: [auth]
+      x-required: true
+      security: []
+      summary: Завершение текущей сессии (идемпотентно)
+      responses:
+        "204": { description: "Сессия отозвана (или её не было), cookie очищена" }
+
+  # ===================== RECURRING =====================
+  /recurring-payments:
+    get:
+      tags: [recurring-payments]
+      x-required: true
+      summary: Список регулярных платежей (обе роли)
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, stopped, all], default: all }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringPaymentPage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [recurring-payments]
+      x-required: true
+      summary: Создать регулярный платёж (только admin)
+      description: |
+        Сразу создаёт периоды (все со сроком ≤ сегодня и ещё два будущих) и, если до срока ≤ 3 дней,
+        ставит напоминание в очередь (отправка в течение ~15 с).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecurringPaymentCreate" }
+            example: { title: "Сервер (VPS)", amount: "120.00", currency: "USD", next_due_date: "2026-11-10", periodicity: "monthly" }
+      responses:
+        "201": { description: Создано, content: { application/json: { schema: { $ref: "#/components/schemas/RecurringPayment" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /recurring-payments/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    get:
+      tags: [recurring-payments]
+      summary: Один регулярный платёж (обе роли)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/RecurringPayment" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [recurring-payments]
+      x-required: true
+      summary: Прекратить регулярный платёж (только admin)
+      description: |
+        Статус → stopped. История сохраняется; неоплаченные периоды со сроком позже сегодня удаляются;
+        новые периоды и напоминания больше не создаются. Повторный вызов возвращает тот же объект.
+      responses:
+        "200": { description: Прекращён, content: { application/json: { schema: { $ref: "#/components/schemas/RecurringPayment" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [recurring-payments]
+      summary: Изменить действующий платёж (только admin)
+      description: |
+        Передаются только меняемые поля. Прекращённый платёж не редактируется (422).
+        - `title`, `amount`, `currency` применяются к неоплаченным периодам со сроком сегодня и позже;
+          оплаченные и прошедшие периоды не меняются (история).
+        - `next_due_date`, `periodicity`, `interval_days` меняют расписание: неоплаченные периоды со сроком
+          сегодня и позже удаляются и создаются заново от `next_due_date` (по умолчанию — текущий ближайший срок).
+        - `assignee_ids` / `assign_all` — ответственные.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecurringPaymentPatch" }
+            examples:
+              amount: { value: { amount: "1600.00", expected_version: 2 } }
+              schedule: { value: { periodicity: every_n_days, interval_days: 10, next_due_date: "2026-11-01" } }
+              assignees: { value: { assignee_ids: [3, 5] } }
+              all: { value: { assign_all: true } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/RecurringPayment" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  # ===================== OCCURRENCES =====================
+  /payment-occurrences:
+    get:
+      tags: [payment-occurrences]
+      x-required: true
+      summary: Платежи по периодам (оплаченные, неоплаченные, просроченные)
+      parameters:
+        - { name: due_from, in: query, schema: { type: string, format: date }, description: "Срок ≥ (включительно)" }
+        - { name: due_to, in: query, schema: { type: string, format: date }, description: "Срок ≤ (включительно)" }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/PaymentStatus" } }
+        - { name: overdue, in: query, schema: { type: boolean }, description: "true — только неоплаченные просроченные" }
+        - { name: currency, in: query, schema: { $ref: "#/components/schemas/Currency" } }
+        - { name: recurring_payment_id, in: query, schema: { type: integer } }
+        - name: assignee_id
+          in: query
+          schema: { type: integer }
+          description: "Платежи, за которые отвечает пользователь: выбран явно или у платежа «все пользователи»"
+        - name: sort
+          in: query
+          schema: { type: string, enum: [due_date, -due_date], default: -due_date }
+          description: "Вторичный ключ всегда id (стабильный порядок)"
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PaymentOccurrencePage" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /payment-occurrences/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    get:
+      tags: [payment-occurrences]
+      x-required: true
+      summary: Конкретный период
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PaymentOccurrence" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [payment-occurrences]
+      x-required: true
+      summary: Отметить оплату, отменить отметку или исправить фактическую дату
+      description: |
+        - `{"status":"paid","paid_date":"…"}` — отметить (или сменить дату, если уже оплачен);
+        - `{"status":"unpaid"}` — отменить, `paid_date` очищается;
+        - `{"paid_date":"…"}` — исправить дату, только для оплаченного (иначе 409 `not_paid`).
+        `paid_date` ≤ сегодня (GMT+3) и ≥ due_date − 366 дней. `due_date` не меняется никогда.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PaymentOccurrencePatch" }
+            examples:
+              markPaid: { value: { status: paid, paid_date: "2026-11-10" } }
+              unmark: { value: { status: unpaid } }
+              fixDate: { value: { paid_date: "2026-11-09", expected_version: 3 } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PaymentOccurrence" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /payments/summary:
+    get:
+      tags: [payments]
+      x-required: true
+      summary: Итоги по валютам за диапазон сроков
+      description: |
+        Выборка — периоды с due_date в [from, to] включительно. По умолчанию текущий календарный месяц GMT+3.
+        Всегда три валюты. total = paid + unpaid; overdue ⊂ unpaid. Статусы текущие.
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Summary" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  # ===================== USERS =====================
+  /users:
+    get:
+      tags: [users]
+      x-required: true
+      summary: Обычные пользователи (только admin; администратор из .env не входит)
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/UserPage" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [users]
+      x-required: true
+      summary: Создать обычного пользователя (только admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserCreate" }
+      responses:
+        "201": { description: Создан, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /users/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    patch:
+      tags: [users]
+      x-required: true
+      summary: Изменить логин и/или пароль (только admin). Смена пароля отзывает сессии пользователя
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserPatch" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+    delete:
+      tags: [users]
+      x-required: true
+      summary: Удалить обычного пользователя (только admin). Мягкое удаление, сессии отзываются, история сохраняется
+      responses:
+        "204": { description: Удалён }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ===================== CONFIG =====================
+  /config:
+    get:
+      tags: [config]
+      summary: Публичная конфигурация и серверный бизнес-день
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AppConfig" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ===================== CALENDAR / BUDGET =====================
+  /calendar:
+    get:
+      tags: [calendar-budget]
+      summary: Календарь оплат на месяц (группировка по сроку)
+      parameters:
+        - name: month
+          in: query
+          schema: { type: string, pattern: "^\\d{4}-(0[1-9]|1[0-2])$" }
+          description: "YYYY-MM, по умолчанию текущий месяц GMT+3"
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/CalendarMonth" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /calendar/export:
+    get:
+      tags: [calendar-budget]
+      summary: Выгрузить календарь команды в CSV или iCalendar (обе роли)
+      description: |
+        Существующие периоды и расчётные (статус «План»), как в `GET /calendar`.
+        По умолчанию — текущий месяц; период не длиннее 366 дней.
+        - `csv` — UTF-8 с BOM, разделитель «;», десятичная запятая (Excel в русской локали открывает как есть).
+          Колонки: Дата; Платёж; Сумма; Валюта; Статус; Ссылка.
+        - `ics` — iCalendar (RFC 5545): событие на весь день на каждый платёж. UID постоянные, поэтому повторный
+          импорт обновляет события, а не дублирует их.
+      parameters:
+        - { name: format, in: query, required: true, schema: { type: string, enum: [csv, ics] } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: Файл (Content-Disposition attachment)
+          content:
+            text/csv: { schema: { type: string } }
+            text/calendar: { schema: { type: string } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /budget:
+    get:
+      tags: [calendar-budget]
+      summary: Плановые расходы на календарный месяц или год
+      parameters:
+        - { name: period, in: query, required: true, schema: { type: string, enum: [month, year] } }
+        - { name: year, in: query, required: true, schema: { type: integer, minimum: 2000, maximum: 2100 } }
+        - { name: month, in: query, schema: { type: integer, minimum: 1, maximum: 12 }, description: "Обязателен при period=month" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Budget" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  # ===================== ATTACHMENTS =====================
+  /payment-occurrences/{id}/attachments:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    get:
+      tags: [attachments]
+      summary: Вложения периода (чеки и ссылки)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Attachment" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [attachments]
+      summary: Добавить чек (multipart) или ссылку (JSON). Не больше 5 на период
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary, description: "JPEG/PNG/PDF, до 10 МБ" }
+              required: [file]
+          application/json:
+            schema: { $ref: "#/components/schemas/LinkCreate" }
+      responses:
+        "201": { description: Создано, content: { application/json: { schema: { $ref: "#/components/schemas/Attachment" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /attachments/{id}/file:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    get:
+      tags: [attachments]
+      summary: Скачать файл чека (Content-Disposition attachment)
+      responses:
+        "200":
+          description: Файл
+          content:
+            application/pdf: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /attachments/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    delete:
+      tags: [attachments]
+      summary: Удалить вложение (автор или admin)
+      responses:
+        "204": { description: Удалено }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ===================== TELEGRAM =====================
+  /telegram/link:
+    post:
+      tags: [telegram]
+      summary: Привязать Telegram-аккаунт текущего пользователя по initData Mini App
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                init_data: { type: string, description: "Telegram.WebApp.initData как есть (строка query)" }
+              required: [init_data]
+      responses:
+        "200": { description: Привязано, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+    delete:
+      tags: [telegram]
+      summary: Отвязать Telegram-аккаунт текущего пользователя
+      responses:
+        "204": { description: Отвязано }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /auth/telegram:
+    post:
+      tags: [auth]
+      security: []
+      summary: "(опционально, последний этап) Вход в Mini App по initData уже привязанного аккаунта"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                init_data: { type: string }
+              required: [init_data]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ===================== AUDIT / NOTIFICATIONS =====================
+  /audit-log:
+    get:
+      tags: [audit]
+      summary: Журнал действий (только admin), новые сверху
+      parameters:
+        - { name: action, in: query, schema: { type: string }, description: "Точное имя или префикс с точкой: auth." }
+        - { name: actor_id, in: query, schema: { type: integer } }
+        - name: recurring_payment_id
+          in: query
+          schema: { type: integer }
+          description: "История регулярного платежа: события самого платежа и его периодов"
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AuditEventPage" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /settings/notifications:
+    get:
+      tags: [settings]
+      summary: Настройки уведомлений (только admin)
+      description: |
+        Действующие значения: сохранённые админом, иначе из .env.
+        Пароль SMTP и секрет webhook не возвращаются — только признаки `*_set`.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/NotificationSettings" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    patch:
+      tags: [settings]
+      summary: Изменить настройки уведомлений (только admin)
+      description: |
+        Передаются только меняемые поля. Пустая строка очищает значение (канал выключается).
+        Изменения применяются без перезапуска: API — сразу, фоновый процесс — в течение нескольких секунд.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotificationSettingsPatch" }
+            examples:
+              smtp: { value: { smtp_host: smtp-relay.brevo.com, smtp_port: 2525, smtp_security: starttls, smtp_user: "a1b2@smtp-brevo.com", smtp_password: "xsmtpsib-…", smtp_from: "billing@example.com", email_recipients: ["admin@example.com"] } }
+              telegram: { value: { telegram_chat_id: "-1004331177965" } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/NotificationSettings" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /settings/notifications/test:
+    post:
+      tags: [settings]
+      summary: Отправить тестовое сообщение через канал (только admin)
+      description: Сообщение уходит сразу, минуя очередь; результат — в ответе и в журнале (`settings.test`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel]
+              additionalProperties: false
+              properties:
+                channel: { type: string, enum: [telegram, email, webhook] }
+      responses:
+        "200":
+          description: OK (ok=false — канал ответил ошибкой)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [channel, ok, error]
+                properties:
+                  channel: { type: string }
+                  ok: { type: boolean }
+                  error: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /supervisor/applications:
+    get:
+      tags: [supervisor]
+      summary: Заявки на создание команд (только супервайзер)
+      description: Новые — от старых к новым; принятые и отклонённые — от новых к старым.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, approved, rejected, all], default: pending }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/TeamApplicationPage" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /supervisor/applications/{id}/approve:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    post:
+      tags: [supervisor]
+      summary: Принять заявку — создать команду (только супервайзер)
+      description: |
+        Создаёт команду, её администратора с временным паролем (сменить при первом входе)
+        и настройки уведомлений из заявки. Бот заявок присылает заявителю данные для входа;
+        если не смог — пароль возвращается в `temp_password`, чтобы передать его самому.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ApplicationDecision" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /supervisor/applications/{id}/reject:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    post:
+      tags: [supervisor]
+      summary: Отклонить заявку с причиной (только супервайзер)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ApplicationDecision" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /notifications/deliveries:
+    get:
+      tags: [notifications]
+      summary: Статусы доставки уведомлений по каналам (только admin, только чтение)
+      parameters:
+        - { name: occurrence_id, in: query, schema: { type: integer } }
+        - { name: channel, in: query, schema: { $ref: "#/components/schemas/Channel" } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/DeliveryStatus" } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryPage" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  # ===================== DEV (только DEV_MODE=true, иначе 404) =====================
+  /dev/clock:
+    get:
+      tags: [dev]
+      summary: Текущее серверное «сегодня» и сдвиг (любой авторизованный, DEV_MODE)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DevClock" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [dev]
+      summary: Установить сдвиг дней (только admin, DEV_MODE)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                offset_days: { type: integer, minimum: -400, maximum: 400 }
+              required: [offset_days]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DevClock" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /dev/run-jobs:
+    post:
+      tags: [dev]
+      summary: Немедленно выполнить цикл воркера — генерация периодов, напоминания, доставка (только admin, DEV_MODE)
+      responses:
+        "202": { description: Запущено }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    cookieAuth: { type: apiKey, in: cookie, name: ik_session }
+    bearerAuth: { type: http, scheme: bearer }
+
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+    Offset: { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+
+  responses:
+    Unauthorized:
+      description: Нет сессии, сессия истекла или отозвана
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { error: { code: unauthorized, message: "Войдите снова" } } } }
+    InvalidCredentials:
+      description: Неверная команда, логин или пароль
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { error: { code: invalid_credentials, message: "Неверная команда, логин или пароль" } } } }
+    TooManyAttempts:
+      description: Слишком много попыток входа
+      headers: { Retry-After: { schema: { type: integer } } }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { error: { code: too_many_attempts, message: "Слишком много попыток. Попробуйте через 5 минут" } } } }
+    Forbidden:
+      description: Недостаточно прав (или защищённая учётная запись администратора — code admin_protected)
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { error: { code: forbidden, message: "Недостаточно прав" } } } }
+    NotFound:
+      description: Не найдено
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { error: { code: not_found, message: "Платёж не найден" } } } }
+    Conflict:
+      description: "Конфликт состояния: login_taken, version_conflict, not_paid, telegram_already_linked, attachments_limit"
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { error: { code: version_conflict, message: "Запись изменена другим пользователем. Обновите данные" } } } }
+    ValidationError:
+      description: Ошибка валидации; details указывает поля
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: validation_error, message: "Проверьте введённые данные", details: [{ field: amount, message: "Сумма должна быть больше нуля" }] } }
+    PayloadTooLarge:
+      description: Файл больше 10 МБ
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [unauthorized, invalid_credentials, too_many_attempts, forbidden, admin_protected, not_found,
+                     validation_error, field_not_allowed, login_taken, version_conflict, not_paid,
+                     telegram_already_linked, telegram_invalid_init_data, attachments_limit, payload_too_large, internal_error,
+                     password_change_required, team_name_taken, application_pending, application_decided]
+            message: { type: string, description: "По-русски, можно показывать пользователю" }
+            details:
+              type: array
+              items:
+                type: object
+                required: [field, message]
+                properties:
+                  field: { type: string }
+                  message: { type: string }
+
+    Money: { type: string, pattern: "^\\d{1,12}\\.\\d{2}$", examples: ["1500.00"] }
+    MoneyInput:
+      type: string
+      pattern: "^\\d{1,12}(\\.\\d{1,2})?$"
+      description: "> 0 и ≤ 999999999999.99; принимается 1500, 1500.5, 1500.50"
+    Currency: { type: string, enum: [RUB, USD, EUR] }
+    Periodicity:
+      type: string
+      enum: [once, daily, weekly, monthly, every_n_days]
+      description: "once — разовый; every_n_days — каждые interval_days дней"
+    PaymentStatus: { type: string, enum: [paid, unpaid] }
+    OccurrenceState:
+      type: string
+      enum: [upcoming, overdue, paid, paid_late]
+      description: "upcoming — не оплачен, срок не прошёл; overdue — не оплачен, сегодня > срок; paid — оплачен ≤ срок; paid_late — оплачен после срока"
+    Role: { type: string, enum: [admin, user, supervisor], description: "supervisor — один на сервис, вне команд" }
+    Channel: { type: string, enum: [telegram, email, webhook, extra] }
+    DeliveryStatus: { type: string, enum: [pending, sending, sent, failed, unknown] }
+    UserRef:
+      type: object
+      required: [id, login]
+      properties:
+        id: { type: integer }
+        login: { type: string, description: "Логин на момент действия; у удалённого пользователя тоже сохраняется" }
+
+    LoginRequest:
+      type: object
+      required: [team, login, password]
+      properties:
+        team: { type: string, maxLength: 64, description: "Название команды" }
+        login: { type: string, minLength: 1, maxLength: 64 }
+        password: { type: string, minLength: 1, maxLength: 128 }
+    LoginResponse:
+      type: object
+      required: [user, session]
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        session:
+          type: object
+          required: [token, expires_at]
+          properties:
+            token: { type: string, description: "То же, что в cookie. Фронту хранить не нужно" }
+            expires_at: { type: string, format: date-time }
+
+    User:
+      type: object
+      required: [id, login, role, is_protected, must_change_password, telegram_linked, telegram_username, telegram_user_id, created_at, updated_at]
+      properties:
+        id: { type: integer }
+        login: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        is_protected: { type: boolean, description: "true у главного администратора команды и у супервайзера" }
+        must_change_password: { type: boolean, description: "Временный пароль: до смены доступны только /auth/me, /auth/password и /auth/logout (403 password_change_required)" }
+        telegram_linked: { type: boolean, description: "Известен числовой Telegram ID: работают кнопка «Оплачено» и личные напоминания" }
+        telegram_username: { type: [string, "null"], description: "Без @. Задан админом или пришёл из Telegram" }
+        telegram_user_id: { type: [integer, "null"], description: "Числовой Telegram ID; null, пока человек не написал боту (если задан только username)" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    UserCreate:
+      type: object
+      required: [login, password]
+      properties:
+        login: { type: string, pattern: "^[a-zA-Z0-9._-]{3,32}$", description: "Приводится к нижнему регистру" }
+        password: { type: string, minLength: 8, maxLength: 128 }
+        telegram: { $ref: "#/components/schemas/TelegramInput" }
+    TelegramInput:
+      type: [string, "null"]
+      maxLength: 64
+      description: "@username (5–32 символа) или числовой Telegram ID. null или пустая строка — отвязать"
+      examples: ["@anna_tg", "123456789"]
+    UserPatch:
+      type: object
+      minProperties: 1
+      properties:
+        login: { type: string, pattern: "^[a-zA-Z0-9._-]{3,32}$" }
+        password: { type: string, minLength: 8, maxLength: 128 }
+        telegram: { $ref: "#/components/schemas/TelegramInput" }
+        expected_version: { type: integer }
+    UserPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/User" } }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    RecurringPaymentCreate:
+      type: object
+      required: [title, amount, currency, next_due_date, periodicity]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 100 }
+        amount: { $ref: "#/components/schemas/MoneyInput" }
+        currency: { $ref: "#/components/schemas/Currency" }
+        next_due_date: { type: string, format: date, description: "Дата ближайшей оплаты = срок первого периода; не раньше сегодня (GMT+3)" }
+        periodicity: { $ref: "#/components/schemas/Periodicity" }
+        interval_days: { type: [integer, "null"], minimum: 1, maximum: 365, description: "Обязателен при every_n_days, иначе не передаётся" }
+        assignee_ids:
+          type: array
+          items: { type: integer }
+          default: []
+          description: "Ответственные — id пользователей из GET /users (role user). Необязательно"
+        assign_all: { type: boolean, default: false, description: "Ответственны все пользователи, включая будущих. Нельзя вместе с непустым assignee_ids" }
+    TeamApplication:
+      type: object
+      required: [id, status, team_name, admin_login, applicant, telegram_chat_id, smtp, created_at, decided_at, decided_by, reject_reason, team_id]
+      properties:
+        id: { type: integer }
+        status: { type: string, enum: [pending, approved, rejected] }
+        team_name: { type: string }
+        admin_login: { type: string }
+        applicant:
+          type: object
+          required: [telegram_id, username, name]
+          properties:
+            telegram_id: { type: integer }
+            username: { type: [string, "null"] }
+            name: { type: [string, "null"] }
+        telegram_chat_id: { type: string }
+        smtp:
+          type: [object, "null"]
+          description: "Пароль SMTP не возвращается — только password_set"
+          required: [host, port, security, user, password_set, from, recipients]
+          properties:
+            host: { type: string }
+            port: { type: integer }
+            security: { type: string, enum: [starttls, ssl, none] }
+            user: { type: string }
+            password_set: { type: boolean }
+            from: { type: string }
+            recipients: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        decided_at: { type: [string, "null"], format: date-time }
+        decided_by: { type: [string, "null"] }
+        reject_reason: { type: [string, "null"] }
+        team_id: { type: [integer, "null"] }
+    TeamApplicationPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/TeamApplication" } }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    ApplicationDecision:
+      type: object
+      required: [application, notified, temp_password]
+      properties:
+        application: { $ref: "#/components/schemas/TeamApplication" }
+        notified: { type: boolean, description: "Заявитель получил сообщение от бота заявок" }
+        temp_password: { type: [string, "null"], description: "Только если бот не смог доставить данные для входа" }
+    NotificationSettings:
+      type: object
+      required: [telegram_chat_id, telegram_bot_configured, telegram_bot_username, smtp_host, smtp_port, smtp_user, smtp_password_set, smtp_from, smtp_security, email_recipients, webhook_url, webhook_secret_set, channels, updated_at, updated_by, version]
+      properties:
+        telegram_chat_id: { type: string, description: "ID группы/канала (например -100…) или @имя_канала; пусто — только личные сообщения" }
+        telegram_bot_configured: { type: boolean, description: "Токен бота задан в .env (меняется только на сервере)" }
+        telegram_bot_username: { type: string }
+        smtp_host: { type: string }
+        smtp_port: { type: integer }
+        smtp_user: { type: string }
+        smtp_password_set: { type: boolean }
+        smtp_from: { type: string }
+        smtp_security: { type: string, enum: [starttls, ssl, none] }
+        email_recipients: { type: array, items: { type: string } }
+        webhook_url: { type: string }
+        webhook_secret_set: { type: boolean }
+        channels:
+          type: object
+          description: "Включён ли канал с текущими настройками"
+          properties:
+            telegram: { type: boolean }
+            email: { type: boolean }
+            webhook: { type: boolean }
+        updated_at: { type: [string, "null"], format: date-time }
+        updated_by: { type: [string, "null"] }
+        version: { type: integer, description: "0 — настройки ещё не сохранялись (всё из .env)" }
+    NotificationSettingsPatch:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        telegram_chat_id: { type: string, maxLength: 64 }
+        smtp_host: { type: string, maxLength: 253 }
+        smtp_port: { type: integer, minimum: 1, maximum: 65535 }
+        smtp_user: { type: string, maxLength: 256 }
+        smtp_password: { type: string, maxLength: 256, description: "Только запись; пустая строка — удалить" }
+        smtp_from: { type: string, maxLength: 254 }
+        smtp_security: { type: string, enum: [starttls, ssl, none] }
+        email_recipients: { type: array, maxItems: 50, items: { type: string } }
+        webhook_url: { type: string, maxLength: 2000, description: "Только https://" }
+        webhook_secret: { type: string, maxLength: 256, description: "Только запись; пустая строка — удалить" }
+        expected_version: { type: integer }
+    RecurringPaymentPatch:
+      type: object
+      minProperties: 1
+      properties:
+        title: { type: string, minLength: 1, maxLength: 100 }
+        amount: { $ref: "#/components/schemas/MoneyInput" }
+        currency: { $ref: "#/components/schemas/Currency" }
+        next_due_date: { type: string, format: date, description: "Новая точка отсчёта расписания; не раньше сегодня" }
+        periodicity: { $ref: "#/components/schemas/Periodicity" }
+        interval_days: { type: [integer, "null"], minimum: 1, maximum: 365 }
+        assignee_ids: { type: array, items: { type: integer } }
+        assign_all: { type: boolean }
+        expected_version: { type: integer }
+    RecurringPayment:
+      type: object
+      required: [id, title, amount, currency, periodicity, interval_days, anchor_day, first_due_date, next_due_date, status, completed, created_at, stopped_at, created_by, assign_all, assignees, version]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        amount: { $ref: "#/components/schemas/Money" }
+        currency: { $ref: "#/components/schemas/Currency" }
+        periodicity: { $ref: "#/components/schemas/Periodicity" }
+        interval_days: { type: [integer, "null"], description: "Для every_n_days; иначе null" }
+        anchor_day: { type: integer, minimum: 1, maximum: 31 }
+        first_due_date: { type: string, format: date, description: "Начало текущего расписания (после смены расписания — новая дата)" }
+        next_due_date: { type: [string, "null"], format: date, description: "Ближайший срок ≥ сегодня; null, если прекращён" }
+        status: { type: string, enum: [active, stopped] }
+        completed: { type: boolean, description: "Разовый платёж оплачен и завершён автоматически (status=stopped)" }
+        created_at: { type: string, format: date-time }
+        stopped_at: { type: [string, "null"], format: date-time }
+        created_by: { $ref: "#/components/schemas/UserRef" }
+        assign_all: { type: boolean, description: "Ответственны все пользователи (assignees тогда пуст)" }
+        assignees: { type: array, items: { $ref: "#/components/schemas/UserRef" }, description: "Выбранные ответственные (только активные пользователи)" }
+        version: { type: integer }
+    RecurringPaymentPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/RecurringPayment" } }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    PaymentOccurrence:
+      type: object
+      required: [id, recurring_payment_id, title, amount, currency, due_date, status, paid_date, is_overdue, is_paid_late,
+                 state, recurring_status, assign_all, assignees, paid_by, paid_via, reminder_sent_at, attachments_count, version, created_at, updated_at]
+      properties:
+        id: { type: integer }
+        recurring_payment_id: { type: integer }
+        title: { type: string }
+        amount: { $ref: "#/components/schemas/Money" }
+        currency: { $ref: "#/components/schemas/Currency" }
+        due_date: { type: string, format: date }
+        status: { $ref: "#/components/schemas/PaymentStatus" }
+        paid_date: { type: [string, "null"], format: date }
+        is_overdue: { type: boolean }
+        is_paid_late: { type: boolean }
+        state: { $ref: "#/components/schemas/OccurrenceState" }
+        recurring_status: { type: string, enum: [active, stopped] }
+        assign_all: { type: boolean, description: "Из регулярного платежа: ответственны все пользователи" }
+        assignees: { type: array, items: { $ref: "#/components/schemas/UserRef" }, description: "Из регулярного платежа: выбранные ответственные" }
+        paid_by: { oneOf: [{ $ref: "#/components/schemas/UserRef" }, { type: "null" }] }
+        paid_via: { type: [string, "null"], enum: [web, telegram, null] }
+        reminder_sent_at: { type: [string, "null"], format: date-time }
+        attachments_count: { type: integer }
+        version: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      example:
+        id: 42
+        recurring_payment_id: 7
+        title: "Сервер (VPS)"
+        amount: "120.00"
+        currency: USD
+        due_date: "2026-11-10"
+        status: paid
+        paid_date: "2026-11-12"
+        is_overdue: false
+        is_paid_late: true
+        state: paid_late
+        recurring_status: active
+        assign_all: false
+        assignees: [{ id: 3, login: anna }]
+        paid_by: { id: 3, login: anna }
+        paid_via: web
+        reminder_sent_at: "2026-11-07T09:00:04+03:00"
+        attachments_count: 1
+        version: 4
+        created_at: "2026-10-24T05:10:00+03:00"
+        updated_at: "2026-11-12T14:31:10+03:00"
+    PaymentOccurrencePatch:
+      type: object
+      minProperties: 1
+      properties:
+        status: { $ref: "#/components/schemas/PaymentStatus" }
+        paid_date: { type: [string, "null"], format: date }
+        expected_version: { type: integer, description: "Если передан и не совпадает — 409 version_conflict" }
+    PaymentOccurrencePage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/PaymentOccurrence" } }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    CurrencyTotals:
+      type: object
+      required: [currency, total, paid, unpaid, overdue, count]
+      properties:
+        currency: { $ref: "#/components/schemas/Currency" }
+        total: { $ref: "#/components/schemas/Money" }
+        paid: { $ref: "#/components/schemas/Money" }
+        unpaid: { $ref: "#/components/schemas/Money" }
+        overdue: { $ref: "#/components/schemas/Money", description: "Подмножество unpaid" }
+        count: { type: integer, description: "Количество периодов в выборке" }
+    Summary:
+      type: object
+      required: [from, to, today, currencies]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        today: { type: string, format: date, description: "Серверный бизнес-день GMT+3" }
+        currencies:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: { $ref: "#/components/schemas/CurrencyTotals" }
+      example:
+        from: "2026-11-01"
+        to: "2026-11-30"
+        today: "2026-11-15"
+        currencies:
+          - { currency: RUB, total: "1700.00", paid: "1000.00", unpaid: "700.00", overdue: "500.00", count: 3 }
+          - { currency: USD, total: "10.00", paid: "10.00", unpaid: "0.00", overdue: "0.00", count: 1 }
+          - { currency: EUR, total: "20.00", paid: "0.00", unpaid: "20.00", overdue: "0.00", count: 1 }
+
+    AppConfig:
+      type: object
+      required: [team, timezone_offset, timezone_label, today, reminder_days_before, currencies, periodicities, telegram_bot_username, miniapp_url, channels, dev_mode]
+      properties:
+        team:
+          type: object
+          required: [id, name]
+          description: "Команда текущего пользователя"
+          properties:
+            id: { type: integer }
+            name: { type: string }
+        timezone_offset: { type: string, pattern: '^[+-]\d{2}:\d{2}$', examples: ["+03:00"], description: "Смещение часового пояса системы (APP_TZ_OFFSET)" }
+        timezone_label: { type: string, examples: ["GMT+3"] }
+        today: { type: string, format: date }
+        reminder_days_before: { type: integer, minimum: 3, examples: [3] }
+        currencies: { type: array, items: { $ref: "#/components/schemas/Currency" } }
+        periodicities: { type: array, items: { $ref: "#/components/schemas/Periodicity" } }
+        telegram_bot_username: { type: [string, "null"] }
+        miniapp_url: { type: [string, "null"] }
+        channels:
+          type: object
+          required: [telegram, email, webhook, extra]
+          properties:
+            telegram: { type: boolean }
+            email: { type: boolean }
+            webhook: { type: boolean }
+            extra: { type: boolean }
+        dev_mode: { type: boolean }
+
+    CalendarItem:
+      type: object
+      required: [occurrence_id, recurring_payment_id, title, amount, currency, due_date, state, is_projected]
+      properties:
+        occurrence_id: { type: [integer, "null"], description: "null у расчётного (ещё не созданного) периода" }
+        recurring_payment_id: { type: integer }
+        title: { type: string }
+        amount: { $ref: "#/components/schemas/Money" }
+        currency: { $ref: "#/components/schemas/Currency" }
+        due_date: { type: string, format: date }
+        state: { oneOf: [{ $ref: "#/components/schemas/OccurrenceState" }, { type: "null" }], description: "null у расчётного" }
+        is_projected: { type: boolean }
+    CalendarDay:
+      type: object
+      required: [date, items, totals]
+      properties:
+        date: { type: string, format: date }
+        items: { type: array, items: { $ref: "#/components/schemas/CalendarItem" } }
+        totals: { type: array, items: { $ref: "#/components/schemas/CurrencyTotals" }, description: "Только по платежам со сроком в этот день (не накопительно); расчётные входят в total и unpaid" }
+    CalendarMonth:
+      type: object
+      required: [month, today, days, month_totals]
+      properties:
+        month: { type: string, examples: ["2026-11"] }
+        today: { type: string, format: date }
+        days: { type: array, items: { $ref: "#/components/schemas/CalendarDay" }, description: "Только дни, в которых есть платежи" }
+        month_totals: { type: array, items: { $ref: "#/components/schemas/CurrencyTotals" } }
+
+    BudgetTotals:
+      type: object
+      required: [currency, planned, existing_paid, existing_unpaid, projected]
+      properties:
+        currency: { $ref: "#/components/schemas/Currency" }
+        planned: { $ref: "#/components/schemas/Money", description: "existing_paid + existing_unpaid + projected" }
+        existing_paid: { $ref: "#/components/schemas/Money" }
+        existing_unpaid: { $ref: "#/components/schemas/Money" }
+        projected: { $ref: "#/components/schemas/Money", description: "Ещё не созданные периоды активных платежей" }
+    Budget:
+      type: object
+      required: [period, from, to, currencies]
+      properties:
+        period: { type: string, enum: [month, year] }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        currencies: { type: array, minItems: 3, maxItems: 3, items: { $ref: "#/components/schemas/BudgetTotals" } }
+
+    LinkCreate:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, format: uri, maxLength: 2048, description: "Только http/https" }
+        title: { type: [string, "null"], maxLength: 100 }
+    Attachment:
+      type: object
+      required: [id, occurrence_id, kind, url, title, file_name, content_type, size_bytes, created_at, created_by]
+      properties:
+        id: { type: integer }
+        occurrence_id: { type: integer }
+        kind: { type: string, enum: [file, link] }
+        url: { type: [string, "null"], description: "Для link — внешний адрес; для file — /api/v1/attachments/{id}/file" }
+        title: { type: [string, "null"] }
+        file_name: { type: [string, "null"] }
+        content_type: { type: [string, "null"], enum: [image/jpeg, image/png, application/pdf, null] }
+        size_bytes: { type: [integer, "null"] }
+        created_at: { type: string, format: date-time }
+        created_by: { $ref: "#/components/schemas/UserRef" }
+
+    AuditEvent:
+      type: object
+      required: [id, at, actor, source, action, object_type, object_id, result, details, ip]
+      properties:
+        id: { type: integer }
+        at: { type: string, format: date-time }
+        actor: { oneOf: [{ $ref: "#/components/schemas/UserRef" }, { type: "null" }] }
+        source: { type: string, enum: [web, telegram, system] }
+        action:
+          type: string
+          examples: [auth.login, auth.login_failed, occurrence.mark_paid, recurring.stop, telegram.paid_button]
+        object_type: { type: [string, "null"], enum: [user, recurring_payment, payment_occurrence, attachment, notification, null] }
+        object_id: { type: [integer, "null"] }
+        result: { type: string, enum: [success, failure] }
+        details: { type: object, additionalProperties: true, description: "Без паролей, токенов и initData" }
+        ip: { type: [string, "null"] }
+    AuditEventPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    Delivery:
+      type: object
+      required: [id, notification_type, occurrence_id, channel, status, attempts, last_error, sent_at, created_at]
+      properties:
+        id: { type: integer }
+        notification_type: { type: string, enum: [payment.due_soon, occurrence.paid, occurrence.unpaid, recurring.created, recurring.stopped] }
+        occurrence_id: { type: [integer, "null"] }
+        channel: { $ref: "#/components/schemas/Channel" }
+        status: { $ref: "#/components/schemas/DeliveryStatus" }
+        attempts: { type: integer }
+        last_error: { type: [string, "null"] }
+        sent_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+    DeliveryPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Delivery" } }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    DevClock:
+      type: object
+      required: [today, real_today, offset_days]
+      properties:
+        today: { type: string, format: date }
+        real_today: { type: string, format: date }
+        offset_days: { type: integer }

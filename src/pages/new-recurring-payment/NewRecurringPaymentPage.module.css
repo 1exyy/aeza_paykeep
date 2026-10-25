@@ -1,0 +1,4 @@
+.page { padding: var(--space-6) 0; }
+.page a { color: var(--color-primary); display: inline-flex; min-height: 44px; align-items: center; }
+.page h1 { margin: var(--space-4) 0; font-size: 24px; line-height: 30px; }
+.page p { color: var(--color-text-muted); }

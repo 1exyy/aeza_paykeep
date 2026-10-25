@@ -1,0 +1,133 @@
+name: invoice-keeper
+
+# Monorepo: frontend (repository root) + backend (backend/). One command:
+#   docker compose up --build        → http://localhost:8080 (UI), /api/v1/docs (Swagger)
+# Compose variables: ./.env (template deploy/compose.env.example), optional.
+# App settings: backend/defaults.env (local defaults) overridden by backend/.env (optional).
+
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+  image: invoice-keeper-backend
+  env_file:
+    - path: backend/defaults.env
+    - path: backend/.env
+      required: false
+  environment:
+    DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/invoice_keeper
+  volumes:
+    - attachments:/data/attachments
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: invoice_keeper
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d invoice_keeper"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  db-test:
+    image: postgres:16-alpine
+    profiles: [test]
+    environment:
+      POSTGRES_DB: invoice_keeper_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  api:
+    <<: *backend
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/openapi.json')"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    # Builds the React SPA from the repository root and serves it; proxies /api/ to api.
+    build:
+      context: .
+      dockerfile: deploy/web/Dockerfile
+    image: invoice-keeper-web
+    ports:
+      # With the https profile set WEB_PORT=127.0.0.1:8080 so only Caddy is public.
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  caddy:
+    # HTTPS with an automatic Let's Encrypt certificate for $DOMAIN (A record → this server).
+    image: caddy:2-alpine
+    profiles: [https]
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      REDIRECT_DOMAINS: ${REDIRECT_DOMAINS:-http://redirect.invalid}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+
+  webhook-sink:
+    # Dev receiver: WEBHOOK_URL=http://webhook-sink:9000/hook (needs DEV_MODE=true).
+    <<: *backend
+    profiles: [dev]
+    command: ["uvicorn", "app.devtools.webhook_sink:app", "--host", "0.0.0.0", "--port", "9000"]
+    volumes: []
+    depends_on: []
+
+  mailpit:
+    # Demo SMTP inbox: SMTP_HOST=mailpit, SMTP_PORT=1025, SMTP_STARTTLS=false; UI http://localhost:8025
+    image: axllent/mailpit:latest
+    profiles: [mail]
+    ports:
+      - "127.0.0.1:8025:8025"
+
+  cloudflared:
+    # HTTPS without a domain: a temporary *.trycloudflare.com URL (changes on every restart).
+    image: cloudflare/cloudflared:latest
+    profiles: [tunnel]
+    command: ["tunnel", "--no-autoupdate", "--url", "http://web:80"]
+    depends_on:
+      - web
+
+networks:
+  default:
+    # Some hosters block IPv4 to api.telegram.org; with IPv6 inside the network the bot falls
+    # back to it automatically (happy eyeballs). Needs Docker 27+ (automatic IPv6 subnet).
+    enable_ipv6: true
+
+volumes:
+  pgdata:
+  attachments:
+  caddy_data:
+  caddy_config:

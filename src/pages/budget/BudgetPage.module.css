@@ -1,0 +1,20 @@
+.page { padding: var(--space-6) 0; }
+.page h1 { margin: 0 0 var(--space-2); font-size: 24px; line-height: 30px; }
+.zone { color: var(--color-text-muted); margin: 0 0 var(--space-6); }
+.controls { display: flex; align-items: end; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-6); }
+.controls > :not(button) { flex: 1 1 130px; min-width: 0; }
+.controls label { display: grid; gap: var(--space-2); font-size: 14px; font-weight: 500; }
+.controls input { width: 100%; min-height: 48px; border: 2px solid var(--color-control-border); border-radius: var(--radius-control); background: var(--color-surface); padding: 8px 12px; font-size: 16px; }
+.page h2 { font-size: 18px; margin: 0 0 var(--space-4); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: var(--space-4); }
+.card { min-width: 0; background: var(--color-surface); border: 1px solid var(--color-border); border-top: 3px solid var(--color-brand); padding: var(--space-5); border-radius: var(--radius-card); }
+.card h3 { display: inline-flex; align-items: center; min-height: 28px; margin: 0 0 var(--space-4); padding: 3px 10px; border-radius: 999px; background: var(--color-surface-accent); color: var(--color-brand-navy); font-size: 14px; line-height: 20px; }
+.plannedLabel { margin: 0 0 4px; color: var(--color-text-muted); font-size: 13px; line-height: 18px; }
+.planned { font-family: "Exo 2", "Inter", sans-serif; font-size: clamp(22px, 2.4vw, 26px); line-height: 32px; font-weight: 700; margin: 0 0 var(--space-5); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.card dl { margin: 0; border-top: 1px solid var(--color-border); }
+.card dl div { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--space-3); padding: 11px 0; border-bottom: 1px solid var(--color-border); }
+.card dl div:last-child { border-bottom: 0; padding-bottom: 0; }
+.card dt { color: var(--color-text-muted); font-size: 13px; line-height: 20px; }
+.card dd { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.warning { color: var(--color-warning); }
+.error { color: var(--color-danger); }

@@ -1,0 +1,197 @@
+"""Private Telegram reminders inside the `telegram` channel. Fake bot."""
+
+from datetime import timedelta
+
+import pytest
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramNetworkError,
+)
+from aiogram.methods import SendMessage
+from httpx import AsyncClient
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.channels import get_channels
+from app.channels import telegram as telegram_channel
+from app.core import clock
+from app.core.config import get_settings
+from app.core.db import get_sessionmaker
+from app.models.notification import Delivery
+from app.models.user import User
+from app.worker.jobs import dispatch_deliveries
+from tests.helpers import ADMIN, bearer, create_recurring, create_user, freeze, login
+
+GROUP = "-1001234567890"
+_M = SendMessage(chat_id=1, text="x")
+
+
+class FakeBot:
+    """Records send_message calls; `errors` maps chat_id → exception to raise."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self.errors: dict[str, list[Exception]] = {}
+
+    async def send_message(self, **kwargs):  # noqa: ANN003, ANN201
+        self.calls.append(kwargs)
+        queue = self.errors.get(str(kwargs["chat_id"]))
+        if queue:
+            raise queue.pop(0)
+
+        class _Msg:
+            message_id = len(self.calls)
+
+        return _Msg()
+
+    def chats(self) -> list[str]:
+        return [str(c["chat_id"]) for c in self.calls]
+
+
+@pytest.fixture
+def bot(monkeypatch: pytest.MonkeyPatch) -> FakeBot:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "telegram_bot_token", type(settings.telegram_bot_token)("1:T"))
+    monkeypatch.setattr(settings, "telegram_chat_id", GROUP)
+    fake = FakeBot()
+    monkeypatch.setattr(telegram_channel, "get_bot", lambda: fake)
+    return fake
+
+
+@pytest.fixture
+async def people(db: AsyncSession) -> None:
+    """anna (tg 111) and boris (tg 222) linked; carl not linked; dora linked but deleted."""
+    for login_name in ("anna", "boris", "carl", "dora"):
+        await create_user(db, login_name, f"{login_name}-password")
+    links = {"anna": 111, "boris": 222, "dora": 444}
+    for login_name, tg in links.items():
+        await db.execute(update(User).where(User.login == login_name).values(telegram_user_id=tg))
+    await db.execute(
+        update(User).where(User.login == "dora").values(deleted_at=clock.Clock().now())
+    )
+    await db.commit()
+
+
+async def _remind(client: AsyncClient) -> None:
+    freeze("2026-11-08T10:00:00+03:00")
+    await create_recurring(client, bearer(await login(client, *ADMIN)), "2026-11-10")
+    await _dispatch()
+
+
+async def _dispatch() -> None:
+    async with get_sessionmaker()() as s:
+        await dispatch_deliveries(s)
+
+
+async def _delivery(db: AsyncSession) -> Delivery:
+    db.expire_all()
+    [d] = (await db.scalars(select(Delivery).where(Delivery.channel == "telegram"))).all()
+    return d
+
+
+async def test_group_then_linked_users(
+    client: AsyncClient, db: AsyncSession, bot: FakeBot, people: None
+) -> None:
+    await _remind(client)
+    assert bot.chats() == [GROUP, "111", "222"]  # not carl (no link), not dora (deleted)
+    group, *private = [c["text"] for c in bot.calls]
+    assert "Сервер (VPS)" in group and "Команда" not in group
+    # a person may be in several teams: private messages name the team
+    assert private and all(text == f"Команда «aeza»\n{group}" for text in private)
+    assert all(
+        c["reply_markup"].inline_keyboard[0][0].callback_data.startswith("paid:") for c in bot.calls
+    )
+    d = await _delivery(db)
+    assert d.status == "sent" and d.last_error is None and d.external_id == "1"
+
+
+async def test_failed_private_message_does_not_fail_or_repeat(
+    client: AsyncClient, db: AsyncSession, bot: FakeBot, people: None
+) -> None:
+    bot.errors["111"] = [
+        TelegramForbiddenError(method=_M, message="Forbidden: bot was blocked by the user")
+    ]
+    bot.errors["222"] = [TelegramNetworkError(method=_M, message="timeout")]
+    await _remind(client)
+    d = await _delivery(db)
+    assert d.status == "sent"
+    assert d.last_error is not None and d.last_error.startswith("private messages 0/2")
+    assert "anna: Telegram 403" in d.last_error and "boris: network" in d.last_error
+    moment = clock.real_now() + timedelta(hours=1)
+    clock.set_real_now(lambda: moment)
+    await _dispatch()
+    assert bot.chats() == [GROUP, "111", "222"]  # nothing is sent again
+
+
+async def test_group_error_sends_no_private_messages_until_retry(
+    client: AsyncClient, db: AsyncSession, bot: FakeBot, people: None
+) -> None:
+    bot.errors[GROUP] = [TelegramBadRequest(method=_M, message="chat not found")]
+    await _remind(client)
+    assert bot.chats() == [GROUP]
+    d = await _delivery(db)
+    assert d.status == "pending"
+    moment = d.next_attempt_at + timedelta(seconds=1)
+    clock.set_real_now(lambda: moment)
+    await _dispatch()
+    assert bot.chats() == [GROUP, GROUP, "111", "222"]  # each private message exactly once
+    assert (await _delivery(db)).status == "sent"
+
+
+async def test_group_no_answer_is_unknown_without_private_messages(
+    client: AsyncClient, db: AsyncSession, bot: FakeBot, people: None
+) -> None:
+    bot.errors[GROUP] = [TelegramNetworkError(method=_M, message="timeout")]
+    await _remind(client)
+    assert bot.chats() == [GROUP]
+    assert (await _delivery(db)).status == "unknown"
+
+
+async def test_switch_off_private_messages(
+    client: AsyncClient,
+    db: AsyncSession,
+    bot: FakeBot,
+    people: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(get_settings(), "telegram_dm_reminders", False)
+    await _remind(client)
+    assert bot.chats() == [GROUP]
+
+
+async def test_private_only_without_group_chat(
+    client: AsyncClient,
+    db: AsyncSession,
+    bot: FakeBot,
+    people: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(get_settings(), "telegram_chat_id", "")
+    bot.errors["111"] = [TelegramForbiddenError(method=_M, message="Forbidden")]
+    await _remind(client)
+    assert bot.chats() == ["111", "222"]
+    d = await _delivery(db)
+    assert d.status == "sent" and "anna: Telegram 403" in (d.last_error or "")
+
+
+async def test_private_only_and_nobody_received_is_retried(
+    client: AsyncClient, db: AsyncSession, bot: FakeBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "telegram_chat_id", "")
+    await _remind(client)  # no linked users at all
+    d = await _delivery(db)
+    assert d.status == "pending" and d.last_error == "no TELEGRAM_CHAT_ID and no linked users"
+
+
+def test_channel_enabled_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "telegram_bot_token", type(settings.telegram_bot_token)(""))
+    assert "telegram" not in get_channels()
+    monkeypatch.setattr(settings, "telegram_bot_token", type(settings.telegram_bot_token)("1:T"))
+    monkeypatch.setattr(settings, "telegram_chat_id", "")
+    assert "telegram" in get_channels()  # private messages only
+    monkeypatch.setattr(settings, "telegram_dm_reminders", False)
+    assert "telegram" not in get_channels()
+    monkeypatch.setattr(settings, "telegram_chat_id", GROUP)
+    assert "telegram" in get_channels()

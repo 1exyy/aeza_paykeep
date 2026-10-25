@@ -1,0 +1,12 @@
+.card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-card); padding: var(--space-4); display: grid; gap: var(--space-3); overflow-wrap: anywhere; }
+.card h2 { margin: 0; font-size: 18px; line-height: 24px; }
+.card dl { margin: 0; display: grid; gap: 6px; }
+.card dl div { display: grid; grid-template-columns: minmax(120px, 160px) 1fr; gap: var(--space-2); }
+.card dt { color: var(--color-text-muted); }
+.card dd { margin: 0; }
+.actions { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+.error { margin: 0; color: var(--color-danger); font-size: 14px; }
+.result { margin: 0; padding: var(--space-3); border-radius: var(--radius-control); background: var(--color-success-bg); color: var(--color-success); }
+.password { font-family: ui-monospace, monospace; font-size: 16px; font-weight: 700; user-select: all; }
+.reason { width: 100%; min-height: 96px; padding: 10px 12px; border: 2px solid var(--color-control-border); border-radius: var(--radius-control); font: inherit; resize: vertical; }
+@media (max-width: 480px) { .card dl div { grid-template-columns: 1fr; gap: 0; } }

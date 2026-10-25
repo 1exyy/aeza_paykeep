@@ -1,0 +1,1 @@
+export { NewUserPage } from './NewUserPage'

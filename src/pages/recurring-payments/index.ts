@@ -1,0 +1,1 @@
+export { RecurringPaymentsPage } from './RecurringPaymentsPage'

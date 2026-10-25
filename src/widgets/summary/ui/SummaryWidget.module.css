@@ -1,0 +1,7 @@
+.widget { margin: var(--space-6) 0; }
+.range { display: flex; align-items: end; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
+.range > * { flex: 1 1 160px; }
+.range button { flex: 0 0 auto; }
+.error { color: var(--color-danger); }
+.warning { color: var(--color-warning); }
+.details { margin-top: var(--space-3); }

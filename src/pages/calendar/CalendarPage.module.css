@@ -1,0 +1,21 @@
+.page { padding: var(--space-6) 0; }
+.page h1 { margin: 0 0 var(--space-2); font-size: 24px; line-height: 30px; }
+.zone { color: var(--color-text-muted); margin: 0 0 var(--space-6); }
+.monthNav { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4); }
+.monthNav button { width: 48px; padding: 0; }
+.monthNav h2 { font-size: 18px; text-align: center; margin: 0; text-transform: capitalize; }
+.grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; max-width: 560px; }
+.grid strong { text-align: center; font-size: 13px; font-weight: 600; padding: 8px 0; }
+.day, .selectedDay { position: relative; min-height: 44px; border: 1px solid var(--color-control-border); border-radius: 8px; background: var(--color-surface); color: var(--color-text); display: flex; align-items: center; justify-content: center; padding: 2px; font-variant-numeric: tabular-nums; }
+.selectedDay { border: 2px solid var(--color-primary); background: var(--color-surface-accent); font-weight: 700; }
+.marker { position: absolute; bottom: 5px; left: 50%; width: 5px; height: 5px; border-radius: 50%; background: var(--color-text); transform: translateX(-50%); pointer-events: none; }
+.selected { margin: var(--space-6) 0; }
+.selected h2 { font-size: 18px; margin: 0 0 var(--space-4); }
+.totals { display: grid; gap: var(--space-3); margin: var(--space-4) 0; }
+.totals h3 { margin: 0; font-size: 16px; }
+.totals div { display: grid; gap: 4px; padding: var(--space-3); border-radius: var(--radius-control); background: var(--color-surface-accent); }
+.totals div span { font-size: 14px; }
+.payments { list-style: none; padding: 0; display: grid; gap: var(--space-3); }
+.payment { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-control); padding: var(--space-3); display: grid; gap: var(--space-2); }
+.payment a { color: var(--color-primary); min-height: 44px; display: inline-flex; align-items: center; }
+.warning { color: var(--color-warning); }

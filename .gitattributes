@@ -1,0 +1,6 @@
+# Shell scripts and container configs must keep LF (they run on Linux).
+*.sh text eol=lf
+Dockerfile text eol=lf
+deploy/caddy/Caddyfile text eol=lf
+deploy/nginx/*.conf text eol=lf
+*.env text eol=lf

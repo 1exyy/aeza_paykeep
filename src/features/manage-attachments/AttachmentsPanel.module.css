@@ -1,0 +1,14 @@
+.panel { margin-top: var(--space-6); border-top: 1px solid var(--color-border); padding-top: var(--space-6); }
+.panel h2 { margin: 0 0 var(--space-4); font-size: 20px; }
+.panel h3 { margin: 0 0 var(--space-3); font-size: 16px; }
+.list { list-style: none; padding: 0; margin: 0 0 var(--space-6); }
+.list li { padding: var(--space-3) 0; border-bottom: 1px solid var(--color-border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); }
+.itemText { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.itemText span { color: var(--color-text-muted); }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.forms { display: grid; gap: var(--space-6); }
+.forms form { display: grid; gap: var(--space-3); }
+.forms input[type='file'] { width: 100%; min-width: 0; box-sizing: border-box; }
+.forms input[type='file']::file-selector-button { min-height: 44px; margin-right: var(--space-2); padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: #fff; font: inherit; cursor: pointer; }
+.fileLabel { font-weight: 600; }
+.error { color: var(--color-danger); }

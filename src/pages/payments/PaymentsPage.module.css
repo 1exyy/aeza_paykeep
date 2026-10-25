@@ -1,0 +1,10 @@
+.page { padding: var(--space-6) 0; }
+.page h1 { margin: 0 0 var(--space-2); font-size: 24px; line-height: 30px; }
+.context { margin: 0 0 var(--space-6); color: var(--color-text-muted); }
+.page h2 { font-size: 18px; line-height: 24px; margin: 0 0 var(--space-4); }
+.list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: var(--space-4); }
+.pagination { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-6); flex-wrap: wrap; }
+.warning { color: var(--color-warning); }
+.listHeading { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-6); }
+.listHeading h2 { margin: 0; scroll-margin-top: var(--space-6); }
+.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: var(--space-3); margin: var(--space-4) 0 var(--space-6); }

@@ -1,0 +1,10 @@
+.page { padding: var(--space-6) 0; }
+.page > a { color: var(--color-primary); min-height: 44px; display: inline-flex; align-items: center; }
+.page h1 { font-size: 24px; line-height: 30px; }
+.filters { display: grid; gap: var(--space-3); margin-bottom: var(--space-6); }
+.filters button { justify-self: start; }
+.list { list-style: none; display: grid; gap: var(--space-3); padding: 0; }
+.card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-card); padding: var(--space-4); display: grid; gap: 4px; overflow-wrap: anywhere; }
+.card span { color: var(--color-text-muted); }
+.pagination { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-6); flex-wrap: wrap; }
+.warning { color: var(--color-warning); }

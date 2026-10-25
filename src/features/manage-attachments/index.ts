@@ -1,0 +1,1 @@
+export { AttachmentsPanel } from './AttachmentsPanel'
