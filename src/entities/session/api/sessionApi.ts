@@ -9,6 +9,7 @@ export type User = {
   /** A temporary password: only the password change is allowed until it is changed. */
   must_change_password?: boolean
   telegram_linked: boolean
+  telegram_dm_enabled: boolean
   /** Without @; set by the admin or learned from Telegram. */
   telegram_username?: string | null
   telegram_user_id?: number | null
@@ -39,7 +40,11 @@ const sessionApi = baseApi.injectEndpoints({
       query: (body) => ({ url: 'auth/password', method: 'POST', body }),
       invalidatesTags: (_result, error) => error ? [] : ['Session'],
     }),
+    updateDmNotifications: builder.mutation<User, boolean>({
+      query: (telegram_dm_enabled) => ({ url: 'auth/me/notifications', method: 'PATCH', body: { telegram_dm_enabled } }),
+      invalidatesTags: (_result, error) => error ? [] : ['Session'],
+    }),
   }),
 })
 
-export const { useGetMeQuery, useLoginMutation, useLogoutMutation, useChangePasswordMutation } = sessionApi
+export const { useGetMeQuery, useLoginMutation, useLogoutMutation, useChangePasswordMutation, useUpdateDmNotificationsMutation } = sessionApi

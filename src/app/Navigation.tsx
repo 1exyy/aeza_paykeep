@@ -47,7 +47,7 @@ function MoreMenu({ user, onLogout, isLoggingOut, logoutError, mobile }: {
         <NavLink to="/deliveries" onClick={() => setOpen(false)}>Доставки уведомлений</NavLink>
         <NavLink to="/settings/notifications" onClick={() => setOpen(false)}>Настройки уведомлений</NavLink>
       </>}
-      <NavLink to="/password" onClick={() => setOpen(false)}>Сменить пароль</NavLink>
+      <NavLink to="/password" onClick={() => setOpen(false)}>Личные настройки</NavLink>
     </nav>
     <div className={styles.moreLogout}>
       <Button variant="secondary" pending={isLoggingOut} onClick={() => void onLogout()}>Выйти</Button>

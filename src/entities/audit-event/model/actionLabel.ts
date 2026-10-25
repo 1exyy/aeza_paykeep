@@ -7,6 +7,7 @@ const labels: Record<string, string> = {
   'occurrence.mark_unpaid': 'Оплата отменена',
   'occurrence.change_paid_date': 'Исправлена дата оплаты',
   'telegram.paid_button': '«Оплачено» в Telegram',
+  'user.telegram_dm_preference_changed': 'Изменены личные уведомления в Telegram',
 }
 
 /** Human label of an audit action; unknown actions are shown as is. */

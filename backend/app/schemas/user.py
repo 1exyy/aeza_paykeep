@@ -19,6 +19,7 @@ class UserOut(BaseModel):
     is_protected: bool
     must_change_password: bool
     telegram_linked: bool
+    telegram_dm_enabled: bool
     telegram_username: str | None
     telegram_user_id: int | None
     created_at: datetime
@@ -33,6 +34,7 @@ class UserOut(BaseModel):
             is_protected=user.is_protected,
             must_change_password=user.must_change_password,
             telegram_linked=user.telegram_linked,
+            telegram_dm_enabled=user.telegram_dm_enabled,
             telegram_username=user.telegram_username,
             telegram_user_id=user.telegram_user_id,
             created_at=to_local(user.created_at),
@@ -65,6 +67,12 @@ class PasswordChange(BaseModel):
     @classmethod
     def _v_new(cls, v: str) -> str:
         return _check_password(v)
+
+
+class DmNotificationPreference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    telegram_dm_enabled: bool
 
 
 class SessionOut(BaseModel):

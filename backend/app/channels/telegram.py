@@ -106,7 +106,11 @@ async def _audience(db: AsyncSession, team_id: int, recurring_payment_id: int | 
         line = "Ответственные: " + (
             ", ".join(mention(u) for u in responsible) if responsible else "—"
         )
-        linked = [(u.login, u.telegram_user_id) for u in responsible if u.telegram_user_id]
+        linked = [
+            (u.login, u.telegram_user_id)
+            for u in responsible
+            if u.telegram_user_id and u.telegram_dm_enabled
+        ]
         return Audience(line, [(login, tg) for login, tg in linked if tg is not None])
     rows = await db.execute(
         select(User.login, User.telegram_user_id)
@@ -114,6 +118,7 @@ async def _audience(db: AsyncSession, team_id: int, recurring_payment_id: int | 
             User.team_id == team_id,
             User.deleted_at.is_(None),
             User.telegram_user_id.is_not(None),
+            User.telegram_dm_enabled.is_(True),
         )
         .order_by(User.id)
     )

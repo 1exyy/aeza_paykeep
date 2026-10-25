@@ -14,6 +14,7 @@ from app.api.deps import (
     clock_dep,
     current_account,
     current_principal,
+    current_user,
     find_active_session,
     request_token,
 )
@@ -23,7 +24,14 @@ from app.core.db import get_session
 from app.core.errors import AppError
 from app.core.security import hash_password, hash_token, new_session_token, verify_password
 from app.models.user import LoginAttempt, User, UserSession
-from app.schemas.user import LoginRequest, LoginResponse, PasswordChange, SessionOut, UserOut
+from app.schemas.user import (
+    DmNotificationPreference,
+    LoginRequest,
+    LoginResponse,
+    PasswordChange,
+    SessionOut,
+    UserOut,
+)
 from app.services import audit, teams
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -150,6 +158,32 @@ async def login(
 
 @router.get("/me", response_model=UserOut)
 async def me(user: User = Depends(current_account)) -> UserOut:
+    return UserOut.of(user)
+
+
+@router.patch("/me/notifications", response_model=UserOut)
+async def update_my_notifications(
+    body: DmNotificationPreference,
+    request: Request,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_session),
+    clock: Clock = Depends(clock_dep),
+) -> UserOut:
+    if user.telegram_dm_enabled != body.telegram_dm_enabled:
+        user.telegram_dm_enabled = body.telegram_dm_enabled
+        user.version += 1
+        user.updated_at = clock.now()
+        audit.record(
+            db,
+            clock,
+            "user.telegram_dm_preference_changed",
+            actor=user,
+            object_type="user",
+            object_id=user.id,
+            details={"telegram_dm_enabled": body.telegram_dm_enabled},
+            ip=client_ip(request),
+        )
+        await db.commit()
     return UserOut.of(user)
 
 
