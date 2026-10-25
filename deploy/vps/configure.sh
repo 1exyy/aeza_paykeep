@@ -30,6 +30,7 @@ set_kv() {  # set_kv FILE KEY VALUE
 PG_PASSWORD="$(openssl rand -hex 24)"
 ADMIN_PASSWORD="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)"
 SUPERVISOR_PASSWORD="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)"
+TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '\n')"
 
 cp deploy/compose.env.example .env
 set_kv .env POSTGRES_PASSWORD "$PG_PASSWORD"
@@ -39,6 +40,7 @@ if [[ "$MODE" == https ]]; then set_kv .env WEB_PORT "127.0.0.1:8080"; else set_
 cp backend/.env.example backend/.env
 set_kv backend/.env ADMIN_LOGIN admin
 set_kv backend/.env ADMIN_PASSWORD "$ADMIN_PASSWORD"
+set_kv backend/.env TOTP_ENCRYPTION_KEY "$TOTP_ENCRYPTION_KEY"
 set_kv backend/.env DEFAULT_TEAM_NAME aeza
 set_kv backend/.env SUPERVISOR_LOGIN supervisor
 set_kv backend/.env SUPERVISOR_PASSWORD "$SUPERVISOR_PASSWORD"

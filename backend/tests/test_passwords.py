@@ -4,12 +4,32 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import clock, totp
 from app.core.config import get_settings
-from app.services.bootstrap import ensure_admin, ensure_supervisor
+from app.core.db import get_sessionmaker
+from app.services.bootstrap import ensure_admin
 from tests.helpers import ADMIN, bearer, create_user, freeze, login
 
 P = "/api/v1/auth/password"
 NOW = "2026-11-10T12:00:00+03:00"
+
+
+def otp(secret: str) -> str:
+    return totp._code(secret, int(clock.real_now().timestamp()) // 30)
+
+
+async def enroll_admin(client: AsyncClient, headers: dict[str, str], password: str) -> str:
+    started = await client.post(
+        "/api/v1/auth/me/totp/begin", json={"current_password": password}, headers=headers
+    )
+    assert started.status_code == 200
+    secret = started.json()["secret"]
+    assert secret in started.json()["otpauth_uri"]
+    confirmed = await client.post(
+        "/api/v1/auth/me/totp/confirm", json={"code": otp(secret)}, headers=headers
+    )
+    assert confirmed.status_code == 200 and confirmed.json()["totp_enabled"] is True
+    return secret
 
 
 async def test_member_changes_own_password(client: AsyncClient, db: AsyncSession) -> None:
@@ -37,7 +57,12 @@ async def test_env_admin_keeps_a_changed_password(
     freeze(NOW)
     h = bearer(await login(client, *ADMIN))
     client.cookies.clear()
-    body = {"current_password": ADMIN[1], "new_password": "admin-own-password"}
+    missing = {"current_password": ADMIN[1], "new_password": "admin-own-password"}
+    blocked = await client.post(P, json=missing, headers=h)
+    assert blocked.status_code == 403 and blocked.json()["error"]["code"] == "totp_required"
+    secret = await enroll_admin(client, h, ADMIN[1])
+    freeze("2026-11-10T12:00:31+03:00")
+    body = {**missing, "totp_code": otp(secret)}
     assert (await client.post(P, json=body, headers=h)).status_code == 200
 
     await ensure_admin(db)  # an API restart with the same .env
@@ -55,14 +80,45 @@ async def test_env_admin_keeps_a_changed_password(
         get_settings.cache_clear()
 
 
-async def test_supervisor_keeps_a_changed_password(client: AsyncClient, db: AsyncSession) -> None:
+async def test_admin_totp_is_required_single_use_and_limited(client: AsyncClient) -> None:
+    freeze(NOW)
+    admin = bearer(await login(client, *ADMIN))
+    client.cookies.clear()
+    member_login = "anna"
+    async with get_sessionmaker()() as db:
+        await create_user(db, member_login, "anna-password")
+    member = bearer(await login(client, member_login, "anna-password"))
+    client.cookies.clear()
+    assert (
+        await client.post(
+            "/api/v1/auth/me/totp/begin",
+            json={"current_password": "anna-password"},
+            headers=member,
+        )
+    ).status_code == 403
+    secret = await enroll_admin(client, admin, ADMIN[1])
+    body = {"current_password": ADMIN[1], "new_password": "new-admin-password"}
+    assert (await client.post(P, json=body, headers=admin)).status_code == 422
+    body["totp_code"] = otp(secret)  # enrollment consumed this time step
+    assert (await client.post(P, json=body, headers=admin)).status_code == 422
+    freeze("2026-11-10T12:00:31+03:00")
+    body["totp_code"] = "000000" if otp(secret) != "000000" else "999999"
+    for _ in range(5):
+        assert (await client.post(P, json=body, headers=admin)).status_code == 422
+    body["totp_code"] = otp(secret)
+    assert (await client.post(P, json=body, headers=admin)).status_code == 429
+    freeze("2026-11-10T12:05:32+03:00")
+    body["totp_code"] = otp(secret)
+    assert (await client.post(P, json=body, headers=admin)).status_code == 200
+
+
+async def test_supervisor_cannot_change_password(client: AsyncClient) -> None:
     freeze(NOW)
     h = bearer(await login(client, "boss", "boss-test-password", team=""))
     client.cookies.clear()
     body = {"current_password": "boss-test-password", "new_password": "boss-own-password"}
-    assert (await client.post(P, json=body, headers=h)).status_code == 200
-    await ensure_supervisor(db)
-    await login(client, "boss", "boss-own-password", team="")
+    assert (await client.post(P, json=body, headers=h)).status_code == 403
+    await login(client, "boss", "boss-test-password", team="")
 
 
 async def test_admin_sets_member_password(client: AsyncClient, db: AsyncSession) -> None:

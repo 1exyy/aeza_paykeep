@@ -124,6 +124,22 @@ async def test_approve_creates_team_and_temp_password(
     same = {"current_password": password, "new_password": password}
     assert (await client.post(P, json=same, headers=hb)).status_code == 422
     good = {"current_password": password, "new_password": "brand-new-pass"}
+    from app.core import clock, totp
+
+    started = await client.post(
+        "/api/v1/auth/me/totp/begin", json={"current_password": password}, headers=hb
+    )
+    assert started.status_code == 200
+    secret = started.json()["secret"]
+    counter = int(clock.real_now().timestamp()) // 30
+    confirmed = await client.post(
+        "/api/v1/auth/me/totp/confirm",
+        json={"code": totp._code(secret, counter)},
+        headers=hb,
+    )
+    assert confirmed.status_code == 200
+    freeze("2026-11-10T12:00:31+03:00")
+    good["totp_code"] = totp._code(secret, int(clock.real_now().timestamp()) // 30)
     r = await client.post(P, json=good, headers=hb)
     assert check("/auth/password", "post", r)["must_change_password"] is False
     assert (await client.get("/api/v1/payment-occurrences", headers=hb)).status_code == 200

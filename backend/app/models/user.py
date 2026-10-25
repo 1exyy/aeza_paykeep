@@ -74,7 +74,15 @@ class User(Base):
     telegram_dm_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="true"
     )
-    telegram_dm_days_before: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
+    telegram_dm_days_before: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="3"
+    )
+    totp_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    totp_pending_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    totp_pending_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    totp_last_counter: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    totp_failures: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    totp_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -83,6 +91,10 @@ class User(Base):
     @property
     def telegram_linked(self) -> bool:
         return self.telegram_user_id is not None
+
+    @property
+    def totp_enabled(self) -> bool:
+        return self.totp_secret is not None
 
 
 class UserSession(Base):

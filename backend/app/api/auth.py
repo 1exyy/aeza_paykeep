@@ -18,12 +18,14 @@ from app.api.deps import (
     find_active_session,
     request_token,
 )
+from app.core import totp
 from app.core.clock import Clock, real_now, to_local
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.errors import AppError
 from app.core.security import hash_password, hash_token, new_session_token, verify_password
 from app.models.notification import PersonalReminder
+from app.models.team import Team
 from app.models.user import LoginAttempt, User, UserSession
 from app.schemas.user import (
     DmNotificationPreference,
@@ -32,6 +34,9 @@ from app.schemas.user import (
     LoginResponse,
     PasswordChange,
     SessionOut,
+    TotpBegin,
+    TotpConfirm,
+    TotpSetup,
     UserOut,
 )
 from app.services import audit, teams
@@ -41,6 +46,36 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 SESSION_TTL = timedelta(days=7)
 RATE_WINDOW = timedelta(minutes=5)
 RATE_MAX_FAILURES = 5
+TOTP_PENDING_TTL = timedelta(minutes=10)
+TOTP_RATE_WINDOW = timedelta(minutes=5)
+
+
+def _require_admin_totp(user: User) -> None:
+    if user.role != "admin":
+        raise AppError(403, "forbidden", "Двухфакторная защита доступна администратору")
+
+
+async def _verify_totp(db: AsyncSession, user: User, code: str, secret: str) -> int:
+    now = real_now()
+    if (
+        user.totp_failures >= RATE_MAX_FAILURES
+        and user.totp_failed_at is not None
+        and now - user.totp_failed_at < TOTP_RATE_WINDOW
+    ):
+        raise AppError(429, "too_many_attempts", "Слишком много попыток. Повторите через 5 минут")
+    counter = totp.matching_counter(
+        totp.decrypt(secret), code, now, after=user.totp_last_counter
+    )
+    if counter is None:
+        if user.totp_failed_at is None or now - user.totp_failed_at >= TOTP_RATE_WINDOW:
+            user.totp_failures = 0
+        user.totp_failures += 1
+        user.totp_failed_at = now
+        await db.commit()
+        raise AppError.validation("totp_code", "Неверный или уже использованный код")
+    user.totp_failures = 0
+    user.totp_failed_at = None
+    return counter
 
 
 def _set_cookie(response: Response, token: str) -> None:
@@ -163,6 +198,74 @@ async def me(user: User = Depends(current_account)) -> UserOut:
     return UserOut.of(user)
 
 
+@router.post("/me/totp/begin", response_model=TotpSetup)
+async def begin_totp(
+    body: TotpBegin,
+    request: Request,
+    response: Response,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_session),
+    clock: Clock = Depends(clock_dep),
+) -> TotpSetup:
+    user = await db.scalar(select(User).where(User.id == principal.user.id).with_for_update())
+    assert user is not None
+    _require_admin_totp(user)
+    if user.totp_enabled:
+        raise AppError(409, "totp_already_enabled", "Двухфакторная защита уже подключена")
+    if not verify_password(user.password_hash, body.current_password):
+        raise AppError.validation("current_password", "Неверный текущий пароль")
+    secret = totp.new_secret()
+    user.totp_pending_secret = totp.encrypt(secret)
+    user.totp_pending_at = real_now()
+    user.updated_at = clock.now()
+    team = await db.get(Team, user.team_id)
+    audit.record(
+        db, clock, "auth.totp_setup_started", actor=user, object_type="user",
+        object_id=user.id, ip=client_ip(request),
+    )
+    await db.commit()
+    response.headers["Cache-Control"] = "no-store"
+    return TotpSetup(
+        secret=secret,
+        otpauth_uri=totp.provisioning_uri(secret, team.name if team else "team", user.login),
+        expires_at=to_local(user.totp_pending_at + TOTP_PENDING_TTL),
+    )
+
+
+@router.post("/me/totp/confirm", response_model=UserOut)
+async def confirm_totp(
+    body: TotpConfirm,
+    request: Request,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_session),
+    clock: Clock = Depends(clock_dep),
+) -> UserOut:
+    user = await db.scalar(select(User).where(User.id == principal.user.id).with_for_update())
+    assert user is not None
+    _require_admin_totp(user)
+    if user.totp_enabled:
+        raise AppError(409, "totp_already_enabled", "Двухфакторная защита уже подключена")
+    if (
+        user.totp_pending_secret is None
+        or user.totp_pending_at is None
+        or real_now() - user.totp_pending_at > TOTP_PENDING_TTL
+    ):
+        raise AppError(409, "totp_setup_expired", "Начните привязку заново")
+    counter = await _verify_totp(db, user, body.code, user.totp_pending_secret)
+    user.totp_secret = user.totp_pending_secret
+    user.totp_pending_secret = None
+    user.totp_pending_at = None
+    user.totp_last_counter = counter
+    user.version += 1
+    user.updated_at = clock.now()
+    audit.record(
+        db, clock, "auth.totp_enabled", actor=user, object_type="user",
+        object_id=user.id, ip=client_ip(request),
+    )
+    await db.commit()
+    return UserOut.of(user)
+
+
 @router.patch("/me/notifications", response_model=UserOut)
 async def update_my_notifications(
     body: DmNotificationPreference,
@@ -242,10 +345,22 @@ async def change_password(
 ) -> UserOut:
     """Change one's own password; clears a temporary one. Other sessions are signed out."""
     user = principal.user
+    if user.role == "supervisor":
+        raise AppError(403, "forbidden", "Супервайзер не может менять свой пароль")
+    if user.role == "admin":
+        locked = await db.scalar(select(User).where(User.id == user.id).with_for_update())
+        assert locked is not None
+        user = locked
     if not verify_password(user.password_hash, body.current_password):
         raise AppError.validation("current_password", "Неверный текущий пароль")
     if body.new_password == body.current_password:
         raise AppError.validation("new_password", "Новый пароль должен отличаться от текущего")
+    if user.role == "admin":
+        if not user.totp_secret:
+            raise AppError(403, "totp_required", "Сначала подключите двухфакторную защиту")
+        if not body.totp_code:
+            raise AppError.validation("totp_code", "Введите код из приложения-аутентификатора")
+        user.totp_last_counter = await _verify_totp(db, user, body.totp_code, user.totp_secret)
     user.password_hash = hash_password(body.new_password)
     user.must_change_password = False
     user.version += 1

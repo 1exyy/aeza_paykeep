@@ -18,6 +18,7 @@ class UserOut(BaseModel):
     role: str
     is_protected: bool
     must_change_password: bool
+    totp_enabled: bool
     telegram_linked: bool
     telegram_dm_enabled: bool
     telegram_dm_days_before: int
@@ -34,6 +35,7 @@ class UserOut(BaseModel):
             role=user.role,
             is_protected=user.is_protected,
             must_change_password=user.must_change_password,
+            totp_enabled=user.totp_enabled,
             telegram_linked=user.telegram_linked,
             telegram_dm_enabled=user.telegram_dm_enabled,
             telegram_dm_days_before=user.telegram_dm_days_before,
@@ -64,11 +66,30 @@ class PasswordChange(BaseModel):
 
     current_password: str = Field(min_length=1, max_length=128)
     new_password: str
+    totp_code: str | None = Field(default=None, pattern=r"^[0-9]{6}$")
 
     @field_validator("new_password")
     @classmethod
     def _v_new(cls, v: str) -> str:
         return _check_password(v)
+
+
+class TotpBegin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    current_password: str = Field(min_length=1, max_length=128)
+
+
+class TotpConfirm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(pattern=r"^[0-9]{6}$")
+
+
+class TotpSetup(BaseModel):
+    secret: str
+    otpauth_uri: str
+    expires_at: datetime
 
 
 class DmNotificationPreference(BaseModel):

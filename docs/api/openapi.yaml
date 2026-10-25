@@ -115,7 +115,8 @@ paths:
       tags: [auth]
       summary: Сменить свой пароль
       description: |
-        Нужен текущий пароль. Снимает признак временного пароля `must_change_password`;
+        Недоступно супервайзеру. Нужен текущий пароль. Администратору дополнительно нужны подключённый TOTP и
+        свежий шестизначный код. Снимает признак временного пароля `must_change_password`;
         остальные сессии пользователя завершаются. Доступно и с временным паролем.
       requestBody:
         required: true
@@ -128,10 +129,62 @@ paths:
               properties:
                 current_password: { type: string, minLength: 1, maxLength: 128 }
                 new_password: { type: string, minLength: 8, maxLength: 128, description: "Не совпадает с текущим" }
+                totp_code: { type: string, pattern: "^[0-9]{6}$", description: "Обязателен администратору" }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "422": { $ref: "#/components/responses/ValidationError" }
+        "403": { description: Администратор ещё не подключил TOTP или супервайзеру запрещена смена пароля }
+        "429": { $ref: "#/components/responses/TooManyAttempts" }
+  /auth/me/totp/begin:
+    post:
+      tags: [auth]
+      summary: Начать привязку TOTP (только администратор)
+      description: Требует текущий пароль. Доступно с временным паролем. Секрет возвращается только здесь, действует 10 минут, ответ нельзя кешировать.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password]
+              additionalProperties: false
+              properties:
+                current_password: { type: string, minLength: 1, maxLength: 128 }
+      responses:
+        "200":
+          description: Ключ для приложения-аутентификатора
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret, otpauth_uri, expires_at]
+                properties:
+                  secret: { type: string }
+                  otpauth_uri: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+  /auth/me/totp/confirm:
+    post:
+      tags: [auth]
+      summary: Подтвердить привязку TOTP (только администратор)
+      description: Код принимается один раз; пять неверных попыток блокируют проверку на пять минут.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              additionalProperties: false
+              properties:
+                code: { type: string, pattern: "^[0-9]{6}$" }
+      responses:
+        "200": { description: TOTP подключён, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "429": { $ref: "#/components/responses/TooManyAttempts" }
   /auth/logout:
     post:
       tags: [auth]
@@ -817,13 +870,14 @@ components:
 
     User:
       type: object
-      required: [id, login, role, is_protected, must_change_password, telegram_linked, telegram_dm_enabled, telegram_dm_days_before, telegram_username, telegram_user_id, created_at, updated_at]
+      required: [id, login, role, is_protected, must_change_password, totp_enabled, telegram_linked, telegram_dm_enabled, telegram_dm_days_before, telegram_username, telegram_user_id, created_at, updated_at]
       properties:
         id: { type: integer }
         login: { type: string }
         role: { $ref: "#/components/schemas/Role" }
         is_protected: { type: boolean, description: "true у главного администратора команды и у супервайзера" }
-        must_change_password: { type: boolean, description: "Временный пароль: до смены доступны только /auth/me, /auth/password и /auth/logout (403 password_change_required)" }
+        must_change_password: { type: boolean, description: "Временный пароль: до смены доступны только /auth/me, /auth/me/totp/*, /auth/password и /auth/logout (403 password_change_required)" }
+        totp_enabled: { type: boolean, description: "Администратор подтвердил привязку приложения-аутентификатора" }
         telegram_linked: { type: boolean, description: "Известен числовой Telegram ID: работают кнопка «Оплачено» и личные напоминания" }
         telegram_dm_enabled: { type: boolean, description: "Получать личные напоминания в Telegram; общие уведомления команды не затрагивает" }
         telegram_dm_days_before: { type: integer, minimum: 0, maximum: 30, description: "За сколько дней до оплаты отправлять личное напоминание; 0 — в день оплаты" }

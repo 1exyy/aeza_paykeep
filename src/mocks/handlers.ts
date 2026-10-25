@@ -47,6 +47,32 @@ function audit(action: string, objectType: 'user' | 'recurring_payment' | 'payme
 
 export const handlers = [
   http.get(`${api}/auth/me`, () => requireUser() ?? HttpResponse.json(demoState.activeUser)),
+  http.post(`${api}/auth/me/totp/begin`, async ({ request }) => {
+    const denied = requireAdmin()
+    if (denied) return denied
+    const body = await request.json() as { current_password: string }
+    if (body.current_password !== 'demo') return jsonError(422, 'validation_error', 'Неверный текущий пароль')
+    return HttpResponse.json({ secret: 'DEMODEMODEMODEMODEMODEMODEMODEMO', otpauth_uri: 'otpauth://totp/Aeza%20PayKeep%3Ademo%3Aadmin?secret=DEMODEMODEMODEMODEMODEMODEMODEMO&issuer=Aeza%20PayKeep', expires_at: '2026-10-31T12:00:00+03:00' })
+  }),
+  http.post(`${api}/auth/me/totp/confirm`, async ({ request }) => {
+    const denied = requireAdmin()
+    if (denied) return denied
+    const body = await request.json() as { code: string }
+    if (body.code !== '123456') return jsonError(422, 'validation_error', 'Для демо введите 123456')
+    demoState.activeUser!.totp_enabled = true
+    return HttpResponse.json(demoState.activeUser)
+  }),
+  http.post(`${api}/auth/password`, async ({ request }) => {
+    const denied = requireUser()
+    if (denied) return denied
+    if (demoState.activeUser!.role === 'supervisor') return jsonError(403, 'forbidden', 'Супервайзер не может менять пароль')
+    const body = await request.json() as { current_password: string; new_password: string; totp_code?: string }
+    if (body.current_password !== 'demo') return jsonError(422, 'validation_error', 'Неверный текущий пароль')
+    if (demoState.activeUser!.role === 'admin' && !demoState.activeUser!.totp_enabled) return jsonError(403, 'totp_required', 'Сначала подключите двухфакторную защиту')
+    if (demoState.activeUser!.role === 'admin' && body.totp_code !== '123456') return jsonError(422, 'validation_error', 'Для демо введите 123456')
+    demoState.activeUser!.must_change_password = false
+    return HttpResponse.json(demoState.activeUser)
+  }),
   http.patch(`${api}/auth/me/notifications`, async ({ request }) => {
     const denied = requireUser()
     if (denied) return denied
@@ -180,7 +206,7 @@ export const handlers = [
     if (denied) return denied
     const body = await request.json() as { login: string; password: string; telegram?: string }
     if (demoState.users.some(({ login }) => login === body.login)) return jsonError(409, 'login_taken', 'Логин занят')
-    const user = { id: nextId(demoState.users), login: body.login, role: 'user' as const, is_protected: false, telegram_dm_enabled: true, telegram_dm_days_before: 3, ...telegramOf(body.telegram), created_at: demoTimestamp, updated_at: demoTimestamp }
+    const user = { id: nextId(demoState.users), login: body.login, role: 'user' as const, is_protected: false, totp_enabled: false, telegram_dm_enabled: true, telegram_dm_days_before: 3, ...telegramOf(body.telegram), created_at: demoTimestamp, updated_at: demoTimestamp }
     demoState.users.push(user)
     audit('user.created', 'user', user.id)
     return HttpResponse.json(user, { status: 201 })

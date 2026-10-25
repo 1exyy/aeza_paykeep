@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     # Administrator from .env
     admin_login: str = "admin"
     admin_password: SecretStr = SecretStr("")
+    totp_encryption_key: SecretStr = SecretStr("")
 
     # Environment
     public_base_url: str = "http://localhost:8080"

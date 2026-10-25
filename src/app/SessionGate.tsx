@@ -7,8 +7,7 @@ import { ChangePasswordPage } from '@/pages/change-password'
 import { LoginPage } from '@/pages/login'
 import { getHttpStatus, getSafeErrorMessage, baseApi } from '@/shared/api'
 import { useGetConfigQuery, type AppConfig } from '@/shared/config'
-import { Dialog, ErrorState, LoadingState } from '@/shared/ui'
-import { ChangePasswordForm } from '@/features/change-password'
+import { ErrorState, LoadingState } from '@/shared/ui'
 import { Navigation } from './Navigation'
 import styles from './SessionGate.module.css'
 
@@ -53,26 +52,11 @@ function SupervisorShell({ user }: { user: User }) {
     <header className={styles.header}>
       <span className={styles.brand}><img src="/brand/paykeep-wallet.svg" alt="" /><span><b>Aéza</b> PayKeep</span></span>
       <span className={styles.team} title="Роль">Супервайзер · {user.login}</span>
-      <SupervisorPassword />
       <button type="button" className={styles.desktopItem} disabled={isLoggingOut} aria-busy={isLoggingOut || undefined} onClick={() => void handleLogout()}><span>Выйти</span></button>
     </header>
     {logoutError && <p className={styles.logoutError} role="alert">{logoutError}</p>}
     <ApplicationsPage />
   </div>
-}
-
-function SupervisorPassword() {
-  const [open, setOpen] = useState(false)
-  const [done, setDone] = useState(false)
-  return <Dialog
-    trigger={<button type="button" className={styles.desktopItem}><span>Сменить пароль</span></button>}
-    title="Сменить пароль"
-    description="Нужен текущий пароль. Остальные устройства выйдут из приложения."
-    open={open}
-    onOpenChange={(next) => { setOpen(next); setDone(false) }}
-  >
-    {done ? <p role="status">Пароль изменён.</p> : <ChangePasswordForm onChanged={() => setDone(true)} />}
-  </Dialog>
 }
 
 function useSignOut() {
@@ -104,7 +88,7 @@ export function SessionGate() {
   if (isLoading) return <main className={styles.center}><LoadingState /></main>
   if (getHttpStatus(error) === 401) return <LoginPage onAuthenticated={() => void refetch()} />
   if (error || !user) return <main className={styles.center}><ErrorState title="Не удалось проверить доступ" onRetry={() => void refetch()} /></main>
-  if (user.must_change_password) return <TemporaryPassword user={user} onChanged={() => void refetch()} />
   if (user.role === 'supervisor') return <SupervisorShell user={user} />
+  if (user.must_change_password) return <TemporaryPassword user={user} onChanged={() => void refetch()} />
   return <AuthenticatedShell user={user} />
 }

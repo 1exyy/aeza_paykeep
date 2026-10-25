@@ -8,6 +8,7 @@ export type User = {
   is_protected: boolean
   /** A temporary password: only the password change is allowed until it is changed. */
   must_change_password?: boolean
+  totp_enabled: boolean
   telegram_linked: boolean
   telegram_dm_enabled: boolean
   telegram_dm_days_before: number
@@ -20,7 +21,8 @@ export type User = {
 
 /** The login is looked up inside the team. */
 export type LoginRequest = { team: string; login: string; password: string }
-export type PasswordChange = { current_password: string; new_password: string }
+export type PasswordChange = { current_password: string; new_password: string; totp_code?: string }
+export type TotpSetup = { secret: string; otpauth_uri: string; expires_at: string }
 type LoginResponse = {
   user: User
   session: { token: string; expires_at: string }
@@ -41,6 +43,13 @@ const sessionApi = baseApi.injectEndpoints({
       query: (body) => ({ url: 'auth/password', method: 'POST', body }),
       invalidatesTags: (_result, error) => error ? [] : ['Session'],
     }),
+    beginTotp: builder.mutation<TotpSetup, string>({
+      query: (current_password) => ({ url: 'auth/me/totp/begin', method: 'POST', body: { current_password } }),
+    }),
+    confirmTotp: builder.mutation<User, string>({
+      query: (code) => ({ url: 'auth/me/totp/confirm', method: 'POST', body: { code } }),
+      invalidatesTags: (_result, error) => error ? [] : ['Session'],
+    }),
     updateDmNotifications: builder.mutation<User, boolean>({
       query: (telegram_dm_enabled) => ({ url: 'auth/me/notifications', method: 'PATCH', body: { telegram_dm_enabled } }),
       invalidatesTags: (_result, error) => error ? [] : ['Session'],
@@ -52,4 +61,4 @@ const sessionApi = baseApi.injectEndpoints({
   }),
 })
 
-export const { useGetMeQuery, useLoginMutation, useLogoutMutation, useChangePasswordMutation, useUpdateDmNotificationsMutation, useUpdateDmReminderDaysMutation } = sessionApi
+export const { useGetMeQuery, useLoginMutation, useLogoutMutation, useChangePasswordMutation, useBeginTotpMutation, useConfirmTotpMutation, useUpdateDmNotificationsMutation, useUpdateDmReminderDaysMutation } = sessionApi

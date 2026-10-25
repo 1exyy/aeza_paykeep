@@ -5,6 +5,7 @@ export type DemoUser = {
   role: 'admin' | 'user' | 'supervisor'
   is_protected: boolean
   must_change_password?: boolean
+  totp_enabled: boolean
   telegram_linked: boolean
   telegram_dm_enabled: boolean
   telegram_dm_days_before: number
@@ -70,9 +71,9 @@ export type DemoAttachment = {
 
 export const demoToday = '2026-10-24'
 export const demoTimestamp = '2026-10-24T12:00:00+03:00'
-const admin: DemoUser = { id: 1, login: 'admin', role: 'admin', is_protected: true, telegram_linked: false, telegram_dm_enabled: true, telegram_dm_days_before: 3, created_at: demoTimestamp, updated_at: demoTimestamp }
-const anna: DemoUser = { id: 2, login: 'anna', role: 'user', is_protected: false, telegram_linked: false, telegram_dm_enabled: true, telegram_dm_days_before: 3, created_at: demoTimestamp, updated_at: demoTimestamp }
-const boss: DemoUser = { id: 3, login: 'boss', role: 'supervisor', is_protected: true, telegram_linked: false, telegram_dm_enabled: true, telegram_dm_days_before: 3, created_at: demoTimestamp, updated_at: demoTimestamp }
+const admin: DemoUser = { id: 1, login: 'admin', role: 'admin', is_protected: true, totp_enabled: false, telegram_linked: false, telegram_dm_enabled: true, telegram_dm_days_before: 3, created_at: demoTimestamp, updated_at: demoTimestamp }
+const anna: DemoUser = { id: 2, login: 'anna', role: 'user', is_protected: false, totp_enabled: false, telegram_linked: false, telegram_dm_enabled: true, telegram_dm_days_before: 3, created_at: demoTimestamp, updated_at: demoTimestamp }
+const boss: DemoUser = { id: 3, login: 'boss', role: 'supervisor', is_protected: true, totp_enabled: false, telegram_linked: false, telegram_dm_enabled: true, telegram_dm_days_before: 3, created_at: demoTimestamp, updated_at: demoTimestamp }
 
 export const demoState = {
   activeUser: null as DemoUser | null,

@@ -12,6 +12,7 @@ os.environ.update(
         "DB_NULL_POOL": "true",
         "ADMIN_LOGIN": "admin",
         "ADMIN_PASSWORD": "admin-test-password",
+        "TOTP_ENCRYPTION_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "PUBLIC_BASE_URL": "http://test",
         "COOKIE_SECURE": "false",
         "DEV_MODE": "true",
